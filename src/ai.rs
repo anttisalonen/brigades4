@@ -27,9 +27,9 @@ struct AiGoto {
 }
 
 impl AiGoto {
-    fn new() -> AiGoto {
+    fn new(bf: &Battlefield) -> AiGoto {
         AiGoto {
-            targetpos: Vector3::new(100.0, 0.0, 100.0)
+            targetpos: Vector3::new(bf.flag_position.x, 0.0, bf.flag_position.y)
         }
     }
 }
@@ -39,7 +39,7 @@ fn ai_goto(targetpos: &Vector3<f32>, soldier: &Soldier, bf: &Battlefield) -> Act
     let tgt_vec = Vector3::new(diff_vec.x, 0.0, diff_vec.z);
     let dist_to_tgt = tgt_vec.norm();
     if dist_to_tgt > 10.0 {
-        let vel = 18.0f32;
+        let vel = 1.3f32;
         Action::MoveAction(soldier.id, tgt_vec.normalize() * (vel * bf.frame_time as f32))
     } else {
         Action::NoAction(soldier.id)
@@ -95,13 +95,16 @@ pub fn soldier_ai_update(sai: &mut SoldierAI, soldier: &Soldier, bf: &Battlefiel
             Some(a) => return a,
         }
     }
+    if num_tasks == 0 {
+        sai.tasks.push(AiTask::Goto(AiGoto::new(bf)));
+    }
     return Action::NoAction(soldier.id);
 }
 
 impl SoldierAI {
     pub fn new() -> SoldierAI {
         SoldierAI {
-            tasks: vec![AiTask::Goto(AiGoto::new())],
+            tasks: vec![],
         }
     }
 }
