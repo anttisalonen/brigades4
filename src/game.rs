@@ -121,6 +121,7 @@ pub struct Battlefield {
     winner: Option<bool>,
     winner_timer: f32,
     pub flag_position: Vector2<f32>,
+    time_accel: f32,
 }
 
 pub struct GameState {
@@ -156,6 +157,7 @@ impl GameState {
                 winner: None,
                 winner_timer: WINNER_TIMER,
                 flag_position: Vector2::new(fx, fy),
+                time_accel: 1.0,
             };
             let ai = AiState {
                 soldier_ai: vec![],
@@ -176,8 +178,8 @@ pub fn won(game_state: &GameState) -> Option<bool> {
 }
 
 pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
-    game_state.bf.frame_time = frame_time;
-    game_state.bf.curr_time += frame_time;
+    game_state.bf.frame_time = frame_time * game_state.bf.time_accel as f64;
+    game_state.bf.curr_time += frame_time * game_state.bf.time_accel as f64;
     update_soldiers(game_state);
     check_winner(game_state);
 
@@ -207,6 +209,8 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
                     glium::glutin::VirtualKeyCode::B => spawn_soldier(game_state.bf.camera.position,
                                                                       &mut game_state.bf.soldiers,
                                                                       &mut game_state.ai.soldier_ai, false),
+                    glium::glutin::VirtualKeyCode::Add      => game_state.bf.time_accel = change_time_accel(game_state.bf.time_accel, true),
+                    glium::glutin::VirtualKeyCode::Subtract => game_state.bf.time_accel = change_time_accel(game_state.bf.time_accel, false),
                     _ => ()
                 }
             }
@@ -376,5 +380,22 @@ fn spawn_soldier(pos: Vector3<f32>, soldiers: &mut Vec<Soldier>, soldier_ai: &mu
     };
     soldiers.push(s);
     soldier_ai.push(ai::SoldierAI::new());
+}
+
+fn change_time_accel(time_accel: f32, incr: bool) -> f32 {
+    if time_accel < 0.2 && !incr {
+        return time_accel;
+    }
+    if time_accel > 100.0 && incr {
+        return time_accel;
+    }
+
+    if incr {
+        println!("Time acceleration: {}", time_accel * 2.0);
+        time_accel * 2.0
+    } else {
+        println!("Time acceleration: {}", time_accel * 0.5);
+        time_accel * 0.5
+    }
 }
 
