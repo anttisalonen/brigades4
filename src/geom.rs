@@ -6,6 +6,14 @@ pub struct Vertex {
 implement_vertex!(Vertex, position);
 
 #[derive(Copy, Clone)]
+pub struct TexVertex {
+        pub position: (f32, f32, f32),
+        pub tex_coords: (f32, f32),
+}
+
+implement_vertex!(TexVertex, position, tex_coords);
+
+#[derive(Copy, Clone)]
 pub struct Normal {
     pub normal: (f32, f32, f32)
 }

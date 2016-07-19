@@ -20,11 +20,17 @@ fn clamp(a: i32, b: i32, x: i32) -> i32 {
     return std::cmp::max(std::cmp::min(b, x), a);
 }
 
+#[derive(PartialEq, Eq, Copy, Clone)]
+pub enum Side {
+    Blue,
+    Red,
+}
+
 pub struct Soldier {
     pub position: Vector3<f32>,
     pub direction: f32,
     pub alive: bool,
-    pub side: bool,
+    pub side: Side,
     pub id: usize,
     pub shot_timer: f32,
     pub reap_timer: f32,
@@ -107,7 +113,19 @@ struct AiState {
     soldier_ai: Vec<ai::SoldierAI>,
 }
 
-const WINNER_TIMER: f32 = 3.0;
+const FLAG_TIMER: f32 = 10.0;
+
+pub enum FlagState {
+    Free,
+    Transition(Side),
+    Owned(Side),
+}
+
+pub struct Flag {
+    pub flag_position: Vector2<f32>,
+    pub flag_state: FlagState,
+    flag_timer: f32,
+}
 
 pub struct Battlefield {
     pub display: glium::Display,
@@ -118,9 +136,8 @@ pub struct Battlefield {
     pub ground: Ground,
     pub curr_time: f64,
     pub frame_time: f64,
-    winner: Option<bool>,
-    winner_timer: f32,
-    pub flag_position: Vector2<f32>,
+    winner: Option<Side>,
+    pub flags: Vec<Flag>,
     time_accel: f32,
 }
 
@@ -155,8 +172,22 @@ impl GameState {
                 curr_time: 0.0,
                 frame_time: 0.0,
                 winner: None,
-                winner_timer: WINNER_TIMER,
-                flag_position: Vector2::new(fx, fy),
+                flags: vec![
+                    {
+                        Flag {
+                            flag_position: Vector2::new(fx, fy),
+                            flag_state: FlagState::Free,
+                            flag_timer: FLAG_TIMER
+                        }
+                    },
+                    {
+                        Flag {
+                            flag_position: Vector2::new(fx + 200.0, fy + 200.0),
+                            flag_state: FlagState::Free,
+                            flag_timer: FLAG_TIMER
+                        }
+                    }
+                ],
                 time_accel: 1.0,
             };
             let ai = AiState {
@@ -173,7 +204,7 @@ impl GameState {
     }
 }
 
-pub fn won(game_state: &GameState) -> Option<bool> {
+pub fn won(game_state: &GameState) -> Option<Side> {
     return game_state.bf.winner;
 }
 
@@ -205,10 +236,10 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
                     glium::glutin::VirtualKeyCode::M => kill_soldier(&mut game_state.bf.soldiers[0]),
                     glium::glutin::VirtualKeyCode::N => spawn_soldier(game_state.bf.camera.position,
                                                                       &mut game_state.bf.soldiers,
-                                                                      &mut game_state.ai.soldier_ai, true),
+                                                                      &mut game_state.ai.soldier_ai, Side::Red),
                     glium::glutin::VirtualKeyCode::B => spawn_soldier(game_state.bf.camera.position,
                                                                       &mut game_state.bf.soldiers,
-                                                                      &mut game_state.ai.soldier_ai, false),
+                                                                      &mut game_state.ai.soldier_ai, Side::Blue),
                     glium::glutin::VirtualKeyCode::Add      => game_state.bf.time_accel = change_time_accel(game_state.bf.time_accel, true),
                     glium::glutin::VirtualKeyCode::Subtract => game_state.bf.time_accel = change_time_accel(game_state.bf.time_accel, false),
                     _ => ()
@@ -276,23 +307,50 @@ fn get_actions(ai: &mut AiState, bf: &Battlefield) -> Vec<ai::Action> {
     return ret;
 }
 
-fn check_winner(game_state: &mut GameState) -> () {
-    let mut holding = [false, false];
-    for sold in game_state.bf.soldiers.iter() {
-        if sold.alive {
-            let dist = (game_state.bf.flag_position - Vector2::<f32>::new(sold.position.x, sold.position.z)).norm();
-            if dist < 20.0 {
-                holding[if sold.side { 0 } else { 1 }] = true;
+fn check_flags(gs: &mut GameState) -> () {
+    for ref mut flag in &mut gs.bf.flags {
+        let mut holding = [false, false];
+        for sold in gs.bf.soldiers.iter() {
+            if sold.alive {
+                let dist = (flag.flag_position - Vector2::<f32>::new(sold.position.x, sold.position.z)).norm();
+                if dist < 20.0 {
+                    holding[if sold.side == Side::Blue { 0 } else { 1 }] = true;
+                }
             }
         }
-    }
-    if holding[0] ^ holding[1] {
-        game_state.bf.winner_timer -= game_state.bf.frame_time as f32;
-        if game_state.bf.winner_timer <= 0.0 {
-            game_state.bf.winner = Some(if holding[0] { true } else { false });
+
+        if holding[0] ^ holding[1] {
+            flag.flag_timer -= gs.bf.frame_time as f32;
+            let s = if holding[0] { Side::Blue } else { Side::Red };
+            if flag.flag_timer <= 0.0 {
+                flag.flag_state = FlagState::Owned(s);
+            } else {
+                flag.flag_state = FlagState::Transition(s);
+            }
+        } else {
+            flag.flag_state = FlagState::Free;
+            flag.flag_timer = FLAG_TIMER;
         }
-    } else {
-        game_state.bf.winner_timer = WINNER_TIMER;
+    }
+}
+
+fn check_winner(game_state: &mut GameState) -> () {
+    check_flags(game_state);
+    let mut holding: [usize; 2] = [0, 0];
+    for flag in game_state.bf.flags.iter() {
+        match flag.flag_state {
+            FlagState::Owned(Side::Blue) => holding[0] += 1,
+            FlagState::Owned(Side::Red)  => holding[1] += 1,
+            _                            => (),
+        }
+    }
+
+    if holding[0] == game_state.bf.flags.len() {
+        game_state.bf.winner = Some(Side::Blue);
+    }
+
+    if holding[1] == game_state.bf.flags.len() {
+        game_state.bf.winner = Some(Side::Red);
     }
 }
 
@@ -356,11 +414,11 @@ fn shoot_soldier(from: usize, to: usize, bf: &mut Battlefield) {
 }
 
 fn init_soldiers(gs: &mut GameState) -> () {
-    for side in [false, true].iter() {
+    for side in [Side::Blue, Side::Red].iter() {
         for i in 0..10 {
-            let xp = if *side { 10.0 } else { gs.bf.flag_position.x * 2.0 - 10.0 };
+            let xp = if *side == Side::Red { 10.0 } else { gs.bf.flags[0].flag_position.x * 2.0 - 10.0 };
             let yp = 0.0;
-            let zp = i as f32 * 10.0 + gs.bf.flag_position.y;
+            let zp = i as f32 * 10.0 + gs.bf.flags[0].flag_position.y;
             spawn_soldier(Vector3::new(xp, yp, zp),
                           &mut gs.bf.soldiers,
                           &mut gs.ai.soldier_ai, *side);
@@ -368,7 +426,7 @@ fn init_soldiers(gs: &mut GameState) -> () {
     }
 }
 
-fn spawn_soldier(pos: Vector3<f32>, soldiers: &mut Vec<Soldier>, soldier_ai: &mut Vec<ai::SoldierAI>, side: bool) -> () {
+fn spawn_soldier(pos: Vector3<f32>, soldiers: &mut Vec<Soldier>, soldier_ai: &mut Vec<ai::SoldierAI>, side: Side) -> () {
     let s = Soldier {
         position: pos,
         direction: 0.0,

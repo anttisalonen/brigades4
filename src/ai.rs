@@ -29,7 +29,7 @@ struct AiGoto {
 impl AiGoto {
     fn new(bf: &Battlefield) -> AiGoto {
         AiGoto {
-            targetpos: Vector3::new(bf.flag_position.x, 0.0, bf.flag_position.y)
+            targetpos: Vector3::new(bf.flags[0].flag_position.x, 0.0, bf.flags[0].flag_position.y)
         }
     }
 }
