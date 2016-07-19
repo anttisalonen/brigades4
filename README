@@ -1,0 +1,5 @@
+Brigades is a military simulation.
+
+Usage:
+
+cargo build && cargo run
