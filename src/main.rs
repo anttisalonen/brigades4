@@ -24,13 +24,13 @@ const WATER_MODEL_MATRIX: [[f32; 4]; 4] = {
 
 fn flag_model_matrix(gs: &GameState, flag: &game::Flag) -> [[f32; 4]; 4] {
     let yp = game::get_height_at(&gs.bf.ground,
-                                 flag.flag_position.x / game::TILE_SIZE,
-                                 flag.flag_position.y / game::TILE_SIZE);
+                                 flag.position.x / game::TILE_SIZE,
+                                 flag.position.y / game::TILE_SIZE);
     [
         [24.0, 0.0,  0.0,  0.0],
         [0.0,  24.0, 0.0,  0.0],
         [0.0,  0.0,  24.0, 0.0],
-        [flag.flag_position.x, f32::max(yp, 0.0) + 10.0, flag.flag_position.y, 1.0f32]
+        [flag.position.x, f32::max(yp, 0.0) + 10.0, flag.position.y, 1.0f32]
     ]
 }
 

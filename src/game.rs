@@ -126,7 +126,7 @@ pub enum FlagState {
 }
 
 pub struct Flag {
-    pub flag_position: Vector2<f32>,
+    pub position: Vector2<f32>,
     pub flag_state: FlagState,
     flag_timer: f32,
 }
@@ -164,7 +164,7 @@ impl GameState {
             flag_positions.push(Vector2::new(xp, yp));
         }
         let flags = flag_positions.into_iter().map(|p| Flag {
-            flag_position: p,
+            position: p,
             flag_state: FlagState::Free,
             flag_timer: FLAG_TIMER,
         }).collect();
@@ -314,7 +314,7 @@ fn check_flags(gs: &mut GameState) -> () {
         let mut holding = [false, false];
         for sold in gs.bf.soldiers.iter() {
             if sold.alive {
-                let dist = (flag.flag_position - Vector2::<f32>::new(sold.position.x, sold.position.z)).norm();
+                let dist = (flag.position - Vector2::<f32>::new(sold.position.x, sold.position.z)).norm();
                 if dist < 20.0 {
                     holding[if sold.side == Side::Blue { 0 } else { 1 }] = true;
                 }
