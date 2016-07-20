@@ -40,6 +40,8 @@ pub struct Soldier {
 
 pub const GROUND_SIZE: i32 = 64;
 pub const TILE_SIZE:   f32 = 16.0;
+const REINFORCEMENT_TIME: i32 = 60; // seconds
+const MAX_SOLDIERS_PER_SIDE: i32 = 40;
 
 pub struct Ground {
     height: [[f32; GROUND_SIZE as usize]; GROUND_SIZE as usize],
@@ -196,7 +198,7 @@ impl GameState {
                 ai: ai
             }
         };
-        init_soldiers(&mut gs);
+        init_soldiers(&mut gs, 10);
         gs
     }
 }
@@ -207,7 +209,9 @@ pub fn won(game_state: &GameState) -> Option<Side> {
 
 pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
     game_state.bf.frame_time = frame_time * game_state.bf.time_accel as f64;
+    let prev_curr_time = game_state.bf.curr_time;
     game_state.bf.curr_time += frame_time * game_state.bf.time_accel as f64;
+    spawn_reinforcements(game_state, prev_curr_time);
     update_soldiers(game_state);
     check_winner(game_state);
 
@@ -411,9 +415,10 @@ fn shoot_soldier(from: usize, to: usize, bf: &mut Battlefield) {
     }
 }
 
-fn init_soldiers(gs: &mut GameState) -> () {
+fn init_soldiers(gs: &mut GameState, num: i32) -> () {
     for side in [Side::Blue, Side::Red].iter() {
-        for i in 0..10 {
+        let num_soldiers = gs.bf.soldiers.iter().filter(|s| s.side == *side).count() as i32;
+        for i in 0..(std::cmp::min(num, MAX_SOLDIERS_PER_SIDE - num_soldiers)) {
             let xp = if *side == Side::Red { 20.0 } else { GROUND_SIZE as f32 * TILE_SIZE - 20.0 };
             let yp = 0.0;
             let zp = i as f32 * 10.0 + GROUND_SIZE as f32 * TILE_SIZE * 0.5;
@@ -452,6 +457,15 @@ fn change_time_accel(time_accel: f32, incr: bool) -> f32 {
     } else {
         println!("Time acceleration: {}", time_accel * 0.5);
         time_accel * 0.5
+    }
+}
+
+fn spawn_reinforcements(mut gs: &mut GameState, prev_curr_time: f64) -> () {
+    let pt = prev_curr_time  as u64 / REINFORCEMENT_TIME as u64;
+    let ct = gs.bf.curr_time as u64 / REINFORCEMENT_TIME as u64;
+    if pt != ct && pt > 0 {
+        init_soldiers(&mut gs, 2);
+        println!("Reinforcements have arrived!");
     }
 }
 
