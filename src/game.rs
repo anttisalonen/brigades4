@@ -9,6 +9,8 @@ use na::{Vector2, Vector3, Norm, Rotation3, Cross};
 use ai;
 use geom;
 
+use game::rand::{SeedableRng,Rng};
+
 pub struct Camera {
     pub position:  Vector3<f32>,
     pub direction: Vector3<f32>,
@@ -139,6 +141,7 @@ pub struct Battlefield {
     winner: Option<Side>,
     pub flags: Vec<Flag>,
     time_accel: f32,
+    rng: rand::StdRng,
 }
 
 pub struct GameState {
@@ -148,20 +151,28 @@ pub struct GameState {
 
 impl GameState {
     pub fn new(d: glium::Display) -> GameState {
-        let ground = init_ground();
-        let fx = 200.0;
-        let fy = 200.0;
-        let cpx = fx;
-        let cpz = fy - 200.0;
-        let cpy = f32::max(0.0, get_height_at(&ground,
-                                              cpx / TILE_SIZE,
-                                              cpz / TILE_SIZE)) + 200.0;
+        let seed = std::env::args().last().unwrap_or(String::from("")).parse::<usize>().unwrap_or(21);
+        let mut rng = rand::StdRng::from_seed(&[seed]);
+        let cpx = GROUND_SIZE as f32 * TILE_SIZE * 0.5;
+        let cpy = GROUND_SIZE as f32 * TILE_SIZE * 0.5;
+        let mut flag_positions = Vec::new();
+        for _ in 0..10 {
+            let xp = (rng.gen::<f32>() * 0.8 + 0.1) * GROUND_SIZE as f32 * TILE_SIZE;
+            let yp = (rng.gen::<f32>() * 0.8 + 0.1) * GROUND_SIZE as f32 * TILE_SIZE;
+            flag_positions.push(Vector2::new(xp, yp));
+        }
+        let flags = flag_positions.into_iter().map(|p| Flag {
+            flag_position: p,
+            flag_state: FlagState::Free,
+            flag_timer: FLAG_TIMER,
+        }).collect();
+
         let mut gs = {
             let bf = Battlefield {
                 display: d,
                 camera: Camera {
-                    position:  Vector3::new(cpx, cpy, cpz),
-                    direction: Vector3::new(0.0, -0.707, 0.707),
+                    position:  Vector3::new(cpx, cpy, 0.0),
+                    direction: Vector3::new(0.0, -0.866, 0.5),
                     upvec:     Vector3::new(0.0, 1.0, 0.0),
                     speed:     Vector3::new(0.0, 0.0, 0.0),
                 },
@@ -172,23 +183,9 @@ impl GameState {
                 curr_time: 0.0,
                 frame_time: 0.0,
                 winner: None,
-                flags: vec![
-                    {
-                        Flag {
-                            flag_position: Vector2::new(fx, fy),
-                            flag_state: FlagState::Free,
-                            flag_timer: FLAG_TIMER
-                        }
-                    },
-                    {
-                        Flag {
-                            flag_position: Vector2::new(fx + 200.0, fy + 200.0),
-                            flag_state: FlagState::Free,
-                            flag_timer: FLAG_TIMER
-                        }
-                    }
-                ],
+                flags: flags,
                 time_accel: 1.0,
+                rng: rng,
             };
             let ai = AiState {
                 soldier_ai: vec![],
@@ -242,6 +239,7 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
                                                                       &mut game_state.ai.soldier_ai, Side::Blue),
                     glium::glutin::VirtualKeyCode::Add      => game_state.bf.time_accel = change_time_accel(game_state.bf.time_accel, true),
                     glium::glutin::VirtualKeyCode::Subtract => game_state.bf.time_accel = change_time_accel(game_state.bf.time_accel, false),
+                    glium::glutin::VirtualKeyCode::P => println!("Position: {}", game_state.bf.camera.position),
                     _ => ()
                 }
             }
@@ -405,7 +403,7 @@ fn kill_soldier(soldier: &mut Soldier) -> () {
 fn shoot_soldier(from: usize, to: usize, bf: &mut Battlefield) {
     if bf.soldiers[from].shot_timer <= 0.0 {
         bf.soldiers[from].shot_timer = 1.0;
-        let hit_num = rand::random::<f32>();
+        let hit_num = bf.rng.gen::<f32>();
         if hit_num < 0.9 {
             bf.soldiers[to].alive = false;
         }
@@ -416,9 +414,9 @@ fn shoot_soldier(from: usize, to: usize, bf: &mut Battlefield) {
 fn init_soldiers(gs: &mut GameState) -> () {
     for side in [Side::Blue, Side::Red].iter() {
         for i in 0..10 {
-            let xp = if *side == Side::Red { 10.0 } else { gs.bf.flags[0].flag_position.x * 2.0 - 10.0 };
+            let xp = if *side == Side::Red { 20.0 } else { GROUND_SIZE as f32 * TILE_SIZE - 20.0 };
             let yp = 0.0;
-            let zp = i as f32 * 10.0 + gs.bf.flags[0].flag_position.y;
+            let zp = i as f32 * 10.0 + GROUND_SIZE as f32 * TILE_SIZE * 0.5;
             spawn_soldier(Vector3::new(xp, yp, zp),
                           &mut gs.bf.soldiers,
                           &mut gs.ai.soldier_ai, *side);

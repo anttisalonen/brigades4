@@ -30,13 +30,13 @@ fn flag_model_matrix(gs: &GameState, flag: &game::Flag) -> [[f32; 4]; 4] {
         [24.0, 0.0,  0.0,  0.0],
         [0.0,  24.0, 0.0,  0.0],
         [0.0,  0.0,  24.0, 0.0],
-        [flag.flag_position.x, yp + 10.0, flag.flag_position.y, 1.0f32]
+        [flag.flag_position.x, f32::max(yp, 0.0) + 10.0, flag.flag_position.y, 1.0f32]
     ]
 }
 
 fn flag_color(flag: &game::Flag) -> [f32; 3] {
     match flag.flag_state {
-        game::FlagState::Free                         => [0.5, 0.5, 0.5],
+        game::FlagState::Free                         => [0.8, 0.8, 0.8],
         game::FlagState::Transition(game::Side::Blue) => [0.2, 0.2, 0.6],
         game::FlagState::Transition(game::Side::Red)  => [0.6, 0.2, 0.2],
         game::FlagState::Owned(game::Side::Blue)      => [0.0, 0.0, 1.0],
