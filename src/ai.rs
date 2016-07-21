@@ -7,6 +7,8 @@ use na::{Vector3, Norm};
 
 use game::{Soldier, Battlefield, FlagState};
 
+use gameutil;
+
 const SHOOT_DISTANCE: f32 = 100.0;
 
 pub struct SoldierAI {
@@ -57,7 +59,7 @@ impl AiGoto {
 
 fn find_goto_target(s: &Soldier, bf: &Battlefield) -> Vector3<f32> {
     let side = s.side;
-    let distances = bf.flags.iter().map(|f| dist(s, &Vector3::new(f.position.x, s.position.y, f.position.y)));
+    let distances = bf.flags.iter().map(|f| gameutil::dist_on_map(s, &Vector3::new(f.position.x, s.position.y, f.position.y)));
     let zm = distances.zip(bf.flags.iter());
     let mut zm = Vec::from_iter(zm);
     zm.sort_by(|&(d1, _), &(d2, _)| d1.partial_cmp(&d2).unwrap());
@@ -84,7 +86,7 @@ impl Task for AiGoto {
 }
 
 fn ai_goto(targetpos: &Vector3<f32>, soldier: &Soldier, bf: &Battlefield) -> Action {
-    let tgt_vec = to_vec(soldier, targetpos);
+    let tgt_vec = gameutil::to_vec_on_map(soldier, targetpos);
     let dist_to_tgt = tgt_vec.norm();
     if dist_to_tgt > 10.0 {
         let vel = 1.3f32;
@@ -94,22 +96,13 @@ fn ai_goto(targetpos: &Vector3<f32>, soldier: &Soldier, bf: &Battlefield) -> Act
     }
 }
 
-fn to_vec(s1: &Soldier, tgt: &Vector3<f32>) -> Vector3<f32> {
-    let diff_vec = *tgt - s1.position;
-    Vector3::new(diff_vec.x, 0.0, diff_vec.z)
-}
-
-fn dist(s1: &Soldier, tgt: &Vector3<f32>) -> f32 {
-    to_vec(s1, tgt).norm()
-}
-
 fn find_enemy(soldier: &Soldier, bf: &Battlefield) -> Option<usize> {
     if soldier.ammo <= 0 {
         return None;
     }
 
     for i in 0..bf.soldiers.len() {
-        if bf.soldiers[i].alive && bf.soldiers[i].side != soldier.side && dist(soldier, &bf.soldiers[i].position) < SHOOT_DISTANCE {
+        if bf.soldiers[i].alive && bf.soldiers[i].side != soldier.side && gameutil::dist(soldier, &bf.soldiers[i].position) < SHOOT_DISTANCE {
             return Some(i)
         }
     }

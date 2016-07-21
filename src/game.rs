@@ -8,6 +8,7 @@ use na::{Vector2, Vector3, Norm, Rotation3, Cross};
 
 use ai;
 use geom;
+use gameutil;
 
 use game::rand::{SeedableRng,Rng};
 
@@ -16,10 +17,6 @@ pub struct Camera {
     pub direction: Vector3<f32>,
     pub upvec:     Vector3<f32>,
     pub speed:     Vector3<f32>,
-}
-
-fn clamp(a: i32, b: i32, x: i32) -> i32 {
-    return std::cmp::max(std::cmp::min(b, x), a);
 }
 
 #[derive(PartialEq, Eq, Copy, Clone)]
@@ -44,9 +41,9 @@ pub const GROUND_SIZE: i32 = 64;
 pub const TILE_SIZE:   f32 = 16.0;
 
 // times in seconds
-    const REINFORCEMENT_TIME: i32 = 60;
-    const EAT_TIME: i32           = 479;
-pub const DAY_TIME: f32           = 60.0 * 24.0;
+const REINFORCEMENT_TIME: i32 = 60;
+const EAT_TIME: i32           = 479;
+const DAY_TIME: f32           = 60.0 * 24.0;
 
 const MAX_SOLDIERS_PER_SIDE: i32 = 40;
 
@@ -100,14 +97,14 @@ pub fn get_ground_geometry(ground: &Ground) -> geom::Geom {
 }
 
 pub fn get_height_at_i(ground: &Ground, x: i32, y: i32) -> f32 {
-    let ix = clamp(0, GROUND_SIZE - 1, x) as usize;
-    let iy = clamp(0, GROUND_SIZE - 1, y) as usize;
+    let ix = gameutil::clamp_i(0, GROUND_SIZE - 1, x) as usize;
+    let iy = gameutil::clamp_i(0, GROUND_SIZE - 1, y) as usize;
     return ground.height[ix][iy];
 }
 
 pub fn get_height_at(ground: &Ground, x: f32, y: f32) -> f32 {
-    let ix = clamp(0, GROUND_SIZE - 2, x as i32) as usize;
-    let iy = clamp(0, GROUND_SIZE - 2, y as i32) as usize;
+    let ix = gameutil::clamp_i(0, GROUND_SIZE - 2, x as i32) as usize;
+    let iy = gameutil::clamp_i(0, GROUND_SIZE - 2, y as i32) as usize;
     let fx = f32::fract(x);
     let fy = f32::fract(y);
     let h1 = ground.height[ix + 0][iy + 0];
@@ -189,7 +186,7 @@ impl GameState {
                 prev_mouse_position: None,
                 soldiers: vec![],
                 ground: init_ground(),
-                curr_time: 0.0,
+                curr_time: 360.0,
                 frame_time: 0.0,
                 winner: None,
                 flags: flags,
@@ -250,7 +247,10 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
                                                                       &mut game_state.ai.soldier_ai, Side::Blue),
                     glium::glutin::VirtualKeyCode::Add      => game_state.bf.time_accel = change_time_accel(game_state.bf.time_accel, true),
                     glium::glutin::VirtualKeyCode::Subtract => game_state.bf.time_accel = change_time_accel(game_state.bf.time_accel, false),
-                    glium::glutin::VirtualKeyCode::P => println!("Position: {}", game_state.bf.camera.position),
+                    glium::glutin::VirtualKeyCode::P => println!("Position: {}\nTime: {} {}",
+                                                                 game_state.bf.camera.position,
+                                                                 game_state.bf.curr_time,
+                                                                 curr_day_time_str(game_state)),
                     _ => ()
                 }
             }
@@ -424,11 +424,14 @@ fn shoot_soldier(from: usize, to: usize, bf: &mut Battlefield) {
     if bf.soldiers[from].shot_timer <= 0.0 {
         bf.soldiers[from].shot_timer = 1.0;
         bf.soldiers[from].ammo -= 1;
+        let dist = gameutil::dist(&bf.soldiers[from], &bf.soldiers[to].position);
+        let threshold = if dist > 100.0 { 0.0 } else { -dist * 0.005 + 1.0 };
         let hit_num = bf.rng.gen::<f32>();
-        if hit_num < 0.9 {
+        if hit_num < threshold {
             bf.soldiers[to].alive = false;
         }
-        println!("{} shoots at {}! {}", from, to, hit_num);
+        println!("{} shoots at {}! {} ({} - threshold was {})",
+        from, to, hit_num, !bf.soldiers[to].alive, threshold);
     }
 }
 
@@ -483,7 +486,7 @@ fn change_time_accel(time_accel: f32, incr: bool) -> f32 {
 fn has_tick(gs: &GameState, prev_curr_time: f64, tick: i32) -> bool {
     let pt = prev_curr_time  as u64 / tick as u64;
     let ct = gs.bf.curr_time as u64 / tick as u64;
-    pt != ct && pt > 0
+    pt != ct
 }
 
 fn spawn_reinforcements(mut gs: &mut GameState, prev_curr_time: f64) -> () {
@@ -491,5 +494,18 @@ fn spawn_reinforcements(mut gs: &mut GameState, prev_curr_time: f64) -> () {
         init_soldiers(&mut gs, 2);
         println!("Reinforcements have arrived!");
     }
+}
+
+fn curr_day_time_str(gs: &GameState) -> String {
+    let dt = curr_day_time(gs);
+    let d  = (gs.bf.curr_time as f32 / DAY_TIME) as i32 + 1;
+    let h  = dt * 24.0;
+    let m  = f32::fract(h) * 60.0;
+    let s  = f32::fract(m) * 60.0;
+    format!("Day {} {:02}:{:02}:{:02}", d, h as i32, m as i32, s as i32)
+}
+
+pub fn curr_day_time(gs: &GameState) -> f32 {
+    f32::fract(gs.bf.curr_time as f32 / DAY_TIME)
 }
 

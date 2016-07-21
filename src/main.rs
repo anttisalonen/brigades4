@@ -8,6 +8,7 @@ mod geom;
 mod cube;
 mod ai;
 mod game;
+mod gameutil;
 
 use na::{Vector3, Norm};
 use game::{Soldier, GROUND_SIZE, TILE_SIZE, GameState};
@@ -103,7 +104,7 @@ fn main() {
                                           &cube::INDICES).unwrap();
 
     let vertex_shader_src = r#"
-        #version 140
+        #version 130
 
         in vec3 position;
         in vec3 normal;
@@ -122,22 +123,23 @@ fn main() {
     "#;
 
     let fragment_shader_src = r#"
-        #version 140
+        #version 130
 
         in vec3 v_normal;
         out vec4 color;
         uniform vec3 u_light;
+        uniform float u_ambient;
         uniform vec3 u_color;
 
         void main() {
-            float brightness = dot(normalize(v_normal), normalize(-u_light)) + 0.2;
+            float brightness = max(dot(normalize(v_normal), u_light), u_ambient);
             vec3 dark_color = vec3(0.0, 0.0, 0.0);
             color = vec4(mix(dark_color, u_color, brightness), 1.0);
         }
     "#;
 
     let flag_vertex_shader_src = r#"
-        #version 140
+        #version 130
 
         in vec3 position;
         in vec3 normal;
@@ -159,18 +161,19 @@ fn main() {
     "#;
 
     let flag_fragment_shader_src = r#"
-        #version 140
+        #version 130
 
         in vec3 v_normal;
         in vec2 v_texcoord;
         out vec4 color;
         uniform vec3 u_light;
+        uniform float u_ambient;
         uniform vec3 u_color;
         uniform sampler2D tex;
 
         void main() {
             vec4 tex_value = texture(tex, v_texcoord);
-            float brightness = dot(normalize(v_normal), normalize(-u_light)) + 0.2;
+            float brightness = max(dot(normalize(v_normal), u_light), u_ambient);
             if(tex_value.a < 0.5)
                 discard;
 
@@ -240,7 +243,14 @@ fn main() {
             ]
         };
 
-        let light = [f32::cos(game_state.bf.curr_time as f32 * 0.5) * 0.5, -1.0, f32::sin(game_state.bf.curr_time as f32 * 0.5) * 0.5f32];
+        // curr_day_time is between 0 and 2pi
+        // day_time is between -1 and 1
+        let curr_day_time = game::curr_day_time(&game_state) * 2.0 * 3.141592;
+        let day_time = -f32::cos(curr_day_time);
+        let ambient = 0.01f32;
+        let light_len = gameutil::clamp(0.0, 1.0, day_time * 2.0 + 0.2);
+        let light = Vector3::<f32>::new(f32::sin(curr_day_time), light_len, -f32::sin(curr_day_time * 0.5)).normalize();
+        let light = [light.x * light_len, light.y * light_len, light.z * light_len];
 
         let params = glium::DrawParameters {
             depth: glium::Depth {
@@ -269,6 +279,7 @@ fn main() {
                             view: view,
                             perspective: perspective,
                             u_light: light,
+                            u_ambient: ambient,
                             u_color: flag_color(&flag),
                             tex: &texture,
                         },
@@ -278,12 +289,12 @@ fn main() {
         // water
         target.draw((&water_positions, &water_normals), &water_indices, &program,
                     &uniform! { model: WATER_MODEL_MATRIX, view: view, perspective: perspective,
-                    u_light: light, u_color: [0.0, 0.0, 0.9f32] },
+                    u_light: light, u_ambient: ambient, u_color: [0.0, 0.0, 0.9f32] },
                     &params).unwrap();
 
         target.draw((&ground_positions, &ground_normals), &ground_indices, &program,
                     &uniform! { model: IDENTITY_MATRIX, view: view, perspective: perspective,
-                    u_light: light, u_color: [0.2, 0.8, 0.2f32] },
+                    u_light: light, u_ambient: ambient, u_color: [0.2, 0.8, 0.2f32] },
                     &params).unwrap();
 
         for sold in game_state.bf.soldiers.iter() {
@@ -298,7 +309,7 @@ fn main() {
             };
             target.draw((&positions, &normals), &indices, &program,
                         &uniform! { model: soldier_model_matrix(&sold), view: view, perspective: perspective,
-                        u_light: light, u_color: col },
+                        u_light: light, u_ambient: ambient, u_color: col },
                         &params).unwrap();
         }
         target.finish().unwrap();
