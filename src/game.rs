@@ -36,11 +36,18 @@ pub struct Soldier {
     pub id: usize,
     pub shot_timer: f32,
     pub reap_timer: f32,
+    pub ammo: i32,
+    pub food: i32,
 }
 
 pub const GROUND_SIZE: i32 = 64;
 pub const TILE_SIZE:   f32 = 16.0;
-const REINFORCEMENT_TIME: i32 = 60; // seconds
+
+// times in seconds
+    const REINFORCEMENT_TIME: i32 = 60;
+    const EAT_TIME: i32           = 479;
+pub const DAY_TIME: f32           = 60.0 * 24.0;
+
 const MAX_SOLDIERS_PER_SIDE: i32 = 40;
 
 pub struct Ground {
@@ -212,7 +219,7 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
     let prev_curr_time = game_state.bf.curr_time;
     game_state.bf.curr_time += frame_time * game_state.bf.time_accel as f64;
     spawn_reinforcements(game_state, prev_curr_time);
-    update_soldiers(game_state);
+    update_soldiers(game_state, prev_curr_time);
     check_winner(game_state);
 
     game_state.bf.camera.position += na::rotate(
@@ -356,7 +363,7 @@ fn check_winner(game_state: &mut GameState) -> () {
     }
 }
 
-fn update_soldiers(mut game_state: &mut GameState) -> () {
+fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
     let actions = get_actions(&mut game_state.ai, &game_state.bf);
     for action in actions {
         execute_action(&action, &mut game_state.bf);
@@ -376,6 +383,11 @@ fn update_soldiers(mut game_state: &mut GameState) -> () {
                 game_state.ai.soldier_ai.swap_remove(i);
                 game_state.bf.soldiers.swap_remove(i);
                 reaped = true;
+            }
+        } else if has_tick(game_state, prev_curr_time, EAT_TIME) {
+            game_state.bf.soldiers[i].food -= 1;
+            if game_state.bf.soldiers[i].food < 0 {
+                game_state.bf.soldiers[i].alive = false;
             }
         }
     }
@@ -405,8 +417,13 @@ fn kill_soldier(soldier: &mut Soldier) -> () {
 }
 
 fn shoot_soldier(from: usize, to: usize, bf: &mut Battlefield) {
+    if bf.soldiers[from].ammo <= 0 {
+        return;
+    }
+
     if bf.soldiers[from].shot_timer <= 0.0 {
         bf.soldiers[from].shot_timer = 1.0;
+        bf.soldiers[from].ammo -= 1;
         let hit_num = bf.rng.gen::<f32>();
         if hit_num < 0.9 {
             bf.soldiers[to].alive = false;
@@ -438,6 +455,8 @@ fn spawn_soldier(pos: Vector3<f32>, soldiers: &mut Vec<Soldier>, soldier_ai: &mu
         id: soldiers.len(),
         shot_timer: 0.0,
         reap_timer: 10.0,
+        ammo: 40,
+        food: 8,
     };
     soldiers.push(s);
     soldier_ai.push(ai::SoldierAI::new());
@@ -460,10 +479,15 @@ fn change_time_accel(time_accel: f32, incr: bool) -> f32 {
     }
 }
 
+// true every <tick> seconds
+fn has_tick(gs: &GameState, prev_curr_time: f64, tick: i32) -> bool {
+    let pt = prev_curr_time  as u64 / tick as u64;
+    let ct = gs.bf.curr_time as u64 / tick as u64;
+    pt != ct && pt > 0
+}
+
 fn spawn_reinforcements(mut gs: &mut GameState, prev_curr_time: f64) -> () {
-    let pt = prev_curr_time  as u64 / REINFORCEMENT_TIME as u64;
-    let ct = gs.bf.curr_time as u64 / REINFORCEMENT_TIME as u64;
-    if pt != ct && pt > 0 {
+    if has_tick(gs, prev_curr_time, REINFORCEMENT_TIME) {
         init_soldiers(&mut gs, 2);
         println!("Reinforcements have arrived!");
     }

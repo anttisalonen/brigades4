@@ -104,6 +104,10 @@ fn dist(s1: &Soldier, tgt: &Vector3<f32>) -> f32 {
 }
 
 fn find_enemy(soldier: &Soldier, bf: &Battlefield) -> Option<usize> {
+    if soldier.ammo <= 0 {
+        return None;
+    }
+
     for i in 0..bf.soldiers.len() {
         if bf.soldiers[i].alive && bf.soldiers[i].side != soldier.side && dist(soldier, &bf.soldiers[i].position) < SHOOT_DISTANCE {
             return Some(i)
@@ -113,6 +117,7 @@ fn find_enemy(soldier: &Soldier, bf: &Battlefield) -> Option<usize> {
 }
 
 fn attack(e: usize, soldier: &Soldier, bf: &Battlefield) -> Action {
+    assert!(soldier.ammo > 0);
     let dist = (bf.soldiers[e].position - soldier.position).norm();
     if dist > SHOOT_DISTANCE {
         ai_goto(&bf.soldiers[e].position, soldier, &bf)
