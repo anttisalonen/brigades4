@@ -17,6 +17,7 @@ pub struct Camera {
     pub direction: Vector3<f32>,
     pub upvec:     Vector3<f32>,
     pub speed:     Vector3<f32>,
+    fast:          bool,
 }
 
 #[derive(PartialEq, Eq, Copy, Clone)]
@@ -181,6 +182,7 @@ impl GameState {
                     direction: Vector3::new(0.0, -0.866, 0.5),
                     upvec:     Vector3::new(0.0, 1.0, 0.0),
                     speed:     Vector3::new(0.0, 0.0, 0.0),
+                    fast:      false,
                 },
                 mouse_look: false,
                 prev_mouse_position: None,
@@ -232,12 +234,12 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
                 _, Some(key)) => {
                 match key {
                     glium::glutin::VirtualKeyCode::Escape => return false,
-                    glium::glutin::VirtualKeyCode::W => game_state.bf.camera.speed.z = 30.0,
-                    glium::glutin::VirtualKeyCode::S => game_state.bf.camera.speed.z = -30.0,
-                    glium::glutin::VirtualKeyCode::A => game_state.bf.camera.speed.x = -30.0,
-                    glium::glutin::VirtualKeyCode::D => game_state.bf.camera.speed.x = 30.0,
-                    glium::glutin::VirtualKeyCode::Q => game_state.bf.camera.speed.y = 30.0,
-                    glium::glutin::VirtualKeyCode::E => game_state.bf.camera.speed.y = -30.0,
+                    glium::glutin::VirtualKeyCode::W => game_state.bf.camera.speed.z = cam_speed(game_state.bf.camera.fast),
+                    glium::glutin::VirtualKeyCode::S => game_state.bf.camera.speed.z = -cam_speed(game_state.bf.camera.fast),
+                    glium::glutin::VirtualKeyCode::A => game_state.bf.camera.speed.x = -cam_speed(game_state.bf.camera.fast),
+                    glium::glutin::VirtualKeyCode::D => game_state.bf.camera.speed.x = cam_speed(game_state.bf.camera.fast),
+                    glium::glutin::VirtualKeyCode::Q => game_state.bf.camera.speed.y = cam_speed(game_state.bf.camera.fast),
+                    glium::glutin::VirtualKeyCode::E => game_state.bf.camera.speed.y = -cam_speed(game_state.bf.camera.fast),
                     glium::glutin::VirtualKeyCode::M => kill_soldier(&mut game_state.bf.soldiers[0]),
                     glium::glutin::VirtualKeyCode::N => spawn_soldier(game_state.bf.camera.position,
                                                                       &mut game_state.bf.soldiers,
@@ -251,6 +253,8 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
                                                                  game_state.bf.camera.position,
                                                                  game_state.bf.curr_time,
                                                                  curr_day_time_str(game_state)),
+                    glium::glutin::VirtualKeyCode::RShift => cam_speed_up(&mut game_state.bf.camera),
+                    glium::glutin::VirtualKeyCode::LShift => cam_speed_up(&mut game_state.bf.camera),
                     _ => ()
                 }
             }
@@ -264,6 +268,8 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
                     glium::glutin::VirtualKeyCode::D => game_state.bf.camera.speed.x = 0.0,
                     glium::glutin::VirtualKeyCode::Q => game_state.bf.camera.speed.y = 0.0,
                     glium::glutin::VirtualKeyCode::E => game_state.bf.camera.speed.y = 0.0,
+                    glium::glutin::VirtualKeyCode::RShift => cam_slow_down(&mut game_state.bf.camera),
+                    glium::glutin::VirtualKeyCode::LShift => cam_slow_down(&mut game_state.bf.camera),
                     _ => ()
                 }
             }
@@ -507,5 +513,23 @@ fn curr_day_time_str(gs: &GameState) -> String {
 
 pub fn curr_day_time(gs: &GameState) -> f32 {
     f32::fract(gs.bf.curr_time as f32 / DAY_TIME)
+}
+
+fn cam_speed(fast: bool) -> f32 {
+    if fast {
+        300.0
+    } else {
+        30.0
+    }
+}
+
+fn cam_slow_down(mut cam: &mut Camera) -> () {
+    cam.fast = false;
+    cam.speed /= 10.0;
+}
+
+fn cam_speed_up(mut cam: &mut Camera) -> () {
+    cam.fast = true;
+    cam.speed *= 10.0;
 }
 
