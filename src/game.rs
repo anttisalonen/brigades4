@@ -38,7 +38,7 @@ pub struct Soldier {
     pub food: i32,
 }
 
-pub const GROUND_SIZE: i32 = 64;
+pub const GROUND_NUM_TILES: i32 = 64;
 pub const TILE_SIZE:   f32 = 16.0;
 
 // times in seconds
@@ -49,13 +49,13 @@ const DAY_TIME: f32           = 60.0 * 24.0;
 const MAX_SOLDIERS_PER_SIDE: i32 = 40;
 
 pub struct Ground {
-    height: [[f32; GROUND_SIZE as usize]; GROUND_SIZE as usize],
+    height: [[f32; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize],
 }
 
 pub fn init_ground() -> Ground {
-    let mut g: Ground = Ground { height: [[0.0; GROUND_SIZE as usize]; GROUND_SIZE as usize] };
-    for j in 0..GROUND_SIZE as usize {
-        for i in 0..GROUND_SIZE as usize {
+    let mut g: Ground = Ground { height: [[0.0; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize] };
+    for j in 0..GROUND_NUM_TILES as usize {
+        for i in 0..GROUND_NUM_TILES as usize {
             g.height[i][j] =
                 f32::sin(i as f32 * 0.3) * 30.0 +
                 f32::cos(j as f32 * 0.2) * -25.0 + 30.0;
@@ -65,7 +65,7 @@ pub fn init_ground() -> Ground {
 }
 
 pub fn get_ground_geometry(ground: &Ground) -> geom::Geom {
-    let gu = GROUND_SIZE as usize;
+    let gu = GROUND_NUM_TILES as usize;
     let mut geo = geom::new_geom(gu * gu, (gu - 1) * (gu - 1) * 6);
     for j in 0..gu {
         for i in 0..gu {
@@ -98,14 +98,16 @@ pub fn get_ground_geometry(ground: &Ground) -> geom::Geom {
 }
 
 pub fn get_height_at_i(ground: &Ground, x: i32, y: i32) -> f32 {
-    let ix = gameutil::clamp_i(0, GROUND_SIZE - 1, x) as usize;
-    let iy = gameutil::clamp_i(0, GROUND_SIZE - 1, y) as usize;
+    let ix = gameutil::clamp_i(0, GROUND_NUM_TILES - 1, x) as usize;
+    let iy = gameutil::clamp_i(0, GROUND_NUM_TILES - 1, y) as usize;
     return ground.height[ix][iy];
 }
 
 pub fn get_height_at(ground: &Ground, x: f32, y: f32) -> f32 {
-    let ix = gameutil::clamp_i(0, GROUND_SIZE - 2, x as i32) as usize;
-    let iy = gameutil::clamp_i(0, GROUND_SIZE - 2, y as i32) as usize;
+    let x = x / TILE_SIZE;
+    let y = y / TILE_SIZE;
+    let ix = gameutil::clamp_i(0, GROUND_NUM_TILES - 2, x as i32) as usize;
+    let iy = gameutil::clamp_i(0, GROUND_NUM_TILES - 2, y as i32) as usize;
     let fx = f32::fract(x);
     let fy = f32::fract(y);
     let h1 = ground.height[ix + 0][iy + 0];
@@ -149,6 +151,7 @@ pub struct Battlefield {
     pub flags: Vec<Flag>,
     time_accel: f32,
     rng: rand::StdRng,
+    base_position: [Vector3<f32>; 2],
 }
 
 pub struct GameState {
@@ -160,12 +163,12 @@ impl GameState {
     pub fn new(d: glium::Display) -> GameState {
         let seed = std::env::args().last().unwrap_or(String::from("")).parse::<usize>().unwrap_or(21);
         let mut rng = rand::StdRng::from_seed(&[seed]);
-        let cpx = GROUND_SIZE as f32 * TILE_SIZE * 0.5;
-        let cpy = GROUND_SIZE as f32 * TILE_SIZE * 0.5;
+        let cpx = GROUND_NUM_TILES as f32 * TILE_SIZE * 0.5;
+        let cpy = GROUND_NUM_TILES as f32 * TILE_SIZE * 0.5;
         let mut flag_positions = Vec::new();
         for _ in 0..10 {
-            let xp = (rng.gen::<f32>() * 0.8 + 0.1) * GROUND_SIZE as f32 * TILE_SIZE;
-            let yp = (rng.gen::<f32>() * 0.8 + 0.1) * GROUND_SIZE as f32 * TILE_SIZE;
+            let xp = (rng.gen::<f32>() * 0.8 + 0.1) * GROUND_NUM_TILES as f32 * TILE_SIZE;
+            let yp = (rng.gen::<f32>() * 0.8 + 0.1) * GROUND_NUM_TILES as f32 * TILE_SIZE;
             flag_positions.push(Vector2::new(xp, yp));
         }
         let flags = flag_positions.into_iter().map(|p| Flag {
@@ -173,6 +176,13 @@ impl GameState {
             flag_state: FlagState::Free,
             flag_timer: FLAG_TIMER,
         }).collect();
+
+        let ground = init_ground();
+        let bx0 = 20.0;
+        let bx1 = GROUND_NUM_TILES as f32 * TILE_SIZE - 20.0;
+        let bz = GROUND_NUM_TILES as f32 * TILE_SIZE * 0.5;
+        let by0 = get_height_at(&ground, bx0, bz);
+        let by1 = get_height_at(&ground, bx1, bz);
 
         let mut gs = {
             let bf = Battlefield {
@@ -187,13 +197,17 @@ impl GameState {
                 mouse_look: false,
                 prev_mouse_position: None,
                 soldiers: vec![],
-                ground: init_ground(),
+                ground: ground,
                 curr_time: 360.0,
                 frame_time: 0.0,
                 winner: None,
                 flags: flags,
                 time_accel: 1.0,
                 rng: rng,
+                base_position: [
+                    Vector3::new(bx0, by0, bz),
+                    Vector3::new(bx1, by1, bz)
+                ],
             };
             let ai = AiState {
                 soldier_ai: vec![],
@@ -375,7 +389,7 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
         execute_action(&action, &mut game_state.bf);
     }
     for ref mut sold in &mut game_state.bf.soldiers {
-        sold.position.y = f32::max(0.0, get_height_at(&game_state.bf.ground, sold.position.x / TILE_SIZE, sold.position.z / TILE_SIZE)) + 0.5;
+        sold.position.y = f32::max(0.0, get_height_at(&game_state.bf.ground, sold.position.x, sold.position.z)) + 0.5;
     }
 
     let mut reaped = false;
@@ -445,10 +459,9 @@ fn init_soldiers(gs: &mut GameState, num: i32) -> () {
     for side in [Side::Blue, Side::Red].iter() {
         let num_soldiers = gs.bf.soldiers.iter().filter(|s| s.side == *side).count() as i32;
         for i in 0..(std::cmp::min(num, MAX_SOLDIERS_PER_SIDE - num_soldiers)) {
-            let xp = if *side == Side::Red { 20.0 } else { GROUND_SIZE as f32 * TILE_SIZE - 20.0 };
-            let yp = 0.0;
-            let zp = i as f32 * 10.0 + GROUND_SIZE as f32 * TILE_SIZE * 0.5;
-            spawn_soldier(Vector3::new(xp, yp, zp),
+            let mut pos = gs.bf.base_position[if *side == Side::Red { 1 } else { 0 }];
+            pos.z += i as f32 * 10.0;
+            spawn_soldier(pos,
                           &mut gs.bf.soldiers,
                           &mut gs.ai.soldier_ai, *side);
         }

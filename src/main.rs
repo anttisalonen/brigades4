@@ -11,10 +11,10 @@ mod game;
 mod gameutil;
 
 use na::{Vector3, Norm};
-use game::{Soldier, GROUND_SIZE, TILE_SIZE, GameState};
+use game::{Soldier, GROUND_NUM_TILES, TILE_SIZE, GameState};
 
 const WATER_MODEL_MATRIX: [[f32; 4]; 4] = {
-    const DIM: f32 = GROUND_SIZE as f32 * TILE_SIZE;
+    const DIM: f32 = GROUND_NUM_TILES as f32 * TILE_SIZE;
     [
         [DIM, 0.0, 0.0, 0.0],
         [0.0, DIM, 0.0, 0.0],
@@ -25,8 +25,8 @@ const WATER_MODEL_MATRIX: [[f32; 4]; 4] = {
 
 fn flag_model_matrix(gs: &GameState, flag: &game::Flag) -> [[f32; 4]; 4] {
     let yp = game::get_height_at(&gs.bf.ground,
-                                 flag.position.x / game::TILE_SIZE,
-                                 flag.position.y / game::TILE_SIZE);
+                                 flag.position.x,
+                                 flag.position.y);
     [
         [24.0, 0.0,  0.0,  0.0],
         [0.0,  24.0, 0.0,  0.0],
