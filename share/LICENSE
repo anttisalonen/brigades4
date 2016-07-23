@@ -2,3 +2,8 @@ flag.png:
 	Source: https://commons.wikimedia.org/wiki/File:Flag_icon.svg
 	Author: MGalloway (WMF)
 	License: Creative Commons Attribution-Share Alike 3.0 Unported
+
+food.png:
+	Source: https://commons.wikimedia.org/wiki/File:EU_food_contact_material_symbol.svg
+	Author: European Union
+	License: public domain

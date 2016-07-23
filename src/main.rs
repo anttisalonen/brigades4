@@ -23,15 +23,13 @@ const WATER_MODEL_MATRIX: [[f32; 4]; 4] = {
     ]
 };
 
-fn flag_model_matrix(gs: &GameState, flag: &game::Flag) -> [[f32; 4]; 4] {
-    let yp = game::get_height_at(&gs.bf.ground,
-                                 flag.position.x,
-                                 flag.position.y);
+fn icon_model_matrix(pos: &Vector3<f32>) -> [[f32; 4]; 4] {
+    let yp = f32::max(pos.y, 0.0) + 10.0;
     [
         [24.0, 0.0,  0.0,  0.0],
         [0.0,  24.0, 0.0,  0.0],
         [0.0,  0.0,  24.0, 0.0],
-        [flag.position.x, f32::max(yp, 0.0) + 10.0, flag.position.y, 1.0f32]
+        [pos.x, f32::max(yp, 0.0) + 10.0, pos.z, 1.0f32]
     ]
 }
 
@@ -85,18 +83,30 @@ const IDENTITY_MATRIX: [[f32; 4]; 4] = [
     [0.0, 0.0, 0.0, 1.0]
 ];
 
+struct Gfx {
+    icon_positions: glium::VertexBuffer<geom::TexVertex>,
+    water_normals: glium::VertexBuffer<geom::Normal>,
+    water_indices: glium::IndexBuffer<u16>,
+    program: glium::Program,
+    icon_program: glium::Program,
+}
+
+struct GfxPerFrame {
+    target: glium::Frame,
+    perspective: [[f32; 4]; 4],
+    view: [[f32; 4]; 4],
+    light: [f32; 3],
+    ambient: f32,
+}
+
 fn main() {
     use glium::{DisplayBuild, Surface};
     let display = glium::glutin::WindowBuilder::new()
                         .with_depth_buffer(24)
                         .build_glium().unwrap();
 
-    use std::io::Cursor;
-    let image = image::load(Cursor::new(&include_bytes!("../share/flag.png")[..]),
-                            image::PNG).unwrap().to_rgba();
-    let image_dimensions = image.dimensions();
-    let image = glium::texture::RawImage2d::from_raw_rgba_reversed(image.into_raw(), image_dimensions);
-    let texture = glium::texture::Texture2d::new(&display, image).unwrap();
+    let flag_texture = load_texture("share/flag.png", &display);
+    let food_texture = load_texture("share/food.png", &display);
 
     let positions = glium::VertexBuffer::new(&display, &cube::VERTICES).unwrap();
     let normals = glium::VertexBuffer::new(&display, &cube::NORMALS).unwrap();
@@ -138,7 +148,7 @@ fn main() {
         }
     "#;
 
-    let flag_vertex_shader_src = r#"
+    let icon_vertex_shader_src = r#"
         #version 130
 
         in vec3 position;
@@ -160,7 +170,7 @@ fn main() {
         }
     "#;
 
-    let flag_fragment_shader_src = r#"
+    let icon_fragment_shader_src = r#"
         #version 130
 
         in vec3 v_normal;
@@ -182,7 +192,7 @@ fn main() {
         }
     "#;
 
-    let flag_program = glium::Program::from_source(&display, flag_vertex_shader_src, flag_fragment_shader_src,
+    let icon_program = glium::Program::from_source(&display, icon_vertex_shader_src, icon_fragment_shader_src,
                                               None).unwrap();
 
     let program = glium::Program::from_source(&display, vertex_shader_src, fragment_shader_src,
@@ -201,7 +211,34 @@ fn main() {
     let water_indices = glium::IndexBuffer::new(&game_state.bf.display, glium::index::PrimitiveType::TrianglesList,
                                           &WATER_INDICES).unwrap();
 
-    let flag_positions = glium::VertexBuffer::new(&game_state.bf.display, &FLAG_VERTICES).unwrap();
+    let icon_positions = glium::VertexBuffer::new(&game_state.bf.display, &FLAG_VERTICES).unwrap();
+
+    let params = glium::DrawParameters {
+        depth: glium::Depth {
+            test: glium::draw_parameters::DepthTest::IfLess,
+            write: true,
+            .. Default::default()
+        },
+        backface_culling: glium::draw_parameters::BackfaceCullingMode::CullCounterClockwise,
+        .. Default::default()
+    };
+
+    let icon_params = glium::DrawParameters {
+        depth: glium::Depth {
+            test: glium::draw_parameters::DepthTest::IfLess,
+            write: true,
+            .. Default::default()
+        },
+        .. Default::default()
+    };
+
+    let gfx = Gfx {
+        icon_positions: icon_positions,
+        water_normals: water_normals,
+        water_indices: water_indices,
+        program: program,
+        icon_program: icon_program,
+    };
 
     let mut prev_time = time::precise_time_ns();
     loop {
@@ -220,7 +257,6 @@ fn main() {
 
         let mut target = game_state.bf.display.draw();
         target.clear_color_and_depth((0.5, 0.5, 1.0, 1.0), 1.0);
-
         let view = view_matrix(&game_state.bf.camera.position,
                                &game_state.bf.camera.direction,
                                &game_state.bf.camera.upvec);
@@ -248,54 +284,38 @@ fn main() {
         let curr_day_time = game::curr_day_time(&game_state) * 2.0 * 3.141592;
         let day_time = -f32::cos(curr_day_time);
         let ambient = 0.01f32;
-        let light_len = gameutil::clamp(0.0, 1.0, day_time * 2.0 + 0.2);
+        let light_len = gameutil::clamp(0.0, 1.0, day_time * 2.0 + 1.0);
         let light = Vector3::<f32>::new(f32::sin(curr_day_time), light_len, -f32::sin(curr_day_time * 0.5)).normalize();
-        let light = [light.x * light_len, light.y * light_len, light.z * light_len];
+        let light = gameutil::truncate(light * light_len, 1.0);
 
-        let params = glium::DrawParameters {
-            depth: glium::Depth {
-                test: glium::draw_parameters::DepthTest::IfLess,
-                write: true,
-                .. Default::default()
-            },
-            backface_culling: glium::draw_parameters::BackfaceCullingMode::CullCounterClockwise,
-            .. Default::default()
-        };
-
-        let flag_params = glium::DrawParameters {
-            depth: glium::Depth {
-                test: glium::draw_parameters::DepthTest::IfLess,
-                write: true,
-                .. Default::default()
-            },
-            .. Default::default()
+        let mut gfx_per_frame = GfxPerFrame {
+            target: target,
+            perspective: perspective,
+            view: view,
+            light: [light.x, light.y, light.z],
+            ambient: ambient,
         };
 
         // flag
         for flag in game_state.bf.flags.iter() {
-            target.draw((&flag_positions, &water_normals), &water_indices, &flag_program,
-                        &uniform! {
-                            model: flag_model_matrix(&game_state, flag),
-                            view: view,
-                            perspective: perspective,
-                            u_light: light,
-                            u_ambient: ambient,
-                            u_color: flag_color(&flag),
-                            tex: &texture,
-                        },
-                        &flag_params).unwrap();
+            draw_icon(&gfx, &mut gfx_per_frame, &flag.position,
+                      flag_color(&flag), &flag_texture, &icon_params);
         }
 
-        // water
-        target.draw((&water_positions, &water_normals), &water_indices, &program,
-                    &uniform! { model: WATER_MODEL_MATRIX, view: view, perspective: perspective,
-                    u_light: light, u_ambient: ambient, u_color: [0.0, 0.0, 0.9f32] },
-                    &params).unwrap();
+        // supply
+        for supply in game_state.bf.supply_points.iter() {
+            draw_icon(&gfx, &mut gfx_per_frame, &supply.position,
+                      [1.0, 1.0, 1.0], &food_texture, &icon_params);
+        }
 
-        target.draw((&ground_positions, &ground_normals), &ground_indices, &program,
-                    &uniform! { model: IDENTITY_MATRIX, view: view, perspective: perspective,
-                    u_light: light, u_ambient: ambient, u_color: [0.2, 0.8, 0.2f32] },
-                    &params).unwrap();
+
+        // water
+        draw_model(&gfx, &mut gfx_per_frame, &water_positions, &gfx.water_normals, &gfx.water_indices,
+                   &WATER_MODEL_MATRIX, [0.0, 0.0, 0.9f32], &params);
+
+        // ground
+        draw_model(&gfx, &mut gfx_per_frame, &ground_positions, &ground_normals, &ground_indices,
+                   &IDENTITY_MATRIX, [0.2, 0.8, 0.2f32], &params);
 
         for sold in game_state.bf.soldiers.iter() {
             let col = if sold.alive {
@@ -307,12 +327,10 @@ fn main() {
             } else {
                 [0.0, 0.0, 0.0f32]
             };
-            target.draw((&positions, &normals), &indices, &program,
-                        &uniform! { model: soldier_model_matrix(&sold), view: view, perspective: perspective,
-                        u_light: light, u_ambient: ambient, u_color: col },
-                        &params).unwrap();
+            draw_model(&gfx, &mut gfx_per_frame, &positions, &normals, &indices,
+                       &soldier_model_matrix(&sold), col, &params);
         }
-        target.finish().unwrap();
+        gfx_per_frame.target.finish().unwrap();
     }
 }
 
@@ -344,5 +362,49 @@ fn view_matrix(position: &Vector3<f32>, direction: &Vector3<f32>, up: &Vector3<f
         [s_norm[2], u[2], f.z, 0.0],
         [p[0], p[1], p[2], 1.0],
     ]
+}
+
+fn draw_icon(gfx: &Gfx, mut gfx_per_frame: &mut GfxPerFrame,
+             position: &Vector3<f32>,
+             color: [f32; 3], texture: &glium::Texture2d, params: &glium::DrawParameters) -> () {
+    use glium::{Surface};
+    gfx_per_frame.target.draw((&gfx.icon_positions, &gfx.water_normals), &gfx.water_indices, &gfx.icon_program,
+        &uniform! {
+            model: icon_model_matrix(&position),
+            view: gfx_per_frame.view,
+            perspective: gfx_per_frame.perspective,
+            u_light: gfx_per_frame.light,
+            u_ambient: gfx_per_frame.ambient,
+            u_color: color,
+            tex: texture,
+        },
+        &params).unwrap();
+}
+
+fn draw_model(gfx: &Gfx, mut gfx_per_frame: &mut GfxPerFrame,
+    positions: &glium::VertexBuffer<geom::Vertex>,
+    normals: &glium::VertexBuffer<geom::Normal>,
+    indices: &glium::IndexBuffer<u16>,
+    model: &[[f32; 4]; 4],
+    color: [f32; 3], params: &glium::DrawParameters) -> () {
+    use glium::{Surface};
+    gfx_per_frame.target.draw((positions, normals), indices, &gfx.program,
+        &uniform! {
+            model: *model,
+            view: gfx_per_frame.view,
+            perspective: gfx_per_frame.perspective,
+            u_light: gfx_per_frame.light,
+            u_ambient: gfx_per_frame.ambient,
+            u_color: color
+        },
+        &params).unwrap();
+}
+
+fn load_texture(filename: &str, display: &glium::Display) -> glium::Texture2d {
+    use std::path::Path;
+    let img = image::open(&Path::new(filename)).unwrap().to_rgba();
+    let img_dimensions = img.dimensions();
+    let img = glium::texture::RawImage2d::from_raw_rgba_reversed(img.into_raw(), img_dimensions);
+    glium::texture::Texture2d::new(display, img).unwrap()
 }
 

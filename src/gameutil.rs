@@ -8,9 +8,11 @@ pub fn to_vec_on_map(s1: &Soldier, tgt: &Vector3<f32>) -> Vector3<f32> {
     Vector3::new(diff_vec.x, 0.0, diff_vec.z)
 }
 
+/*
 pub fn dist_on_map(s1: &Soldier, tgt: &Vector3<f32>) -> f32 {
     to_vec_on_map(s1, tgt).norm()
 }
+*/
 
 pub fn to_vec(s1: &Soldier, tgt: &Vector3<f32>) -> Vector3<f32> {
     *tgt - s1.position
@@ -28,4 +30,12 @@ pub fn clamp(a: f32, b: f32, x: f32) -> f32 {
     return f32::max(f32::min(b, x), a);
 }
 
+pub fn truncate(v: Vector3<f32>, len: f32) -> Vector3<f32> {
+    let vl = v.norm();
+    if vl < len {
+        v
+    } else {
+        v.normalize() * len
+    }
+}
 

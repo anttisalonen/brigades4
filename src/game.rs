@@ -4,7 +4,7 @@ extern crate nalgebra as na;
 
 use std;
 
-use na::{Vector2, Vector3, Norm, Rotation3, Cross};
+use na::{Vector3, Norm, Rotation3, Cross};
 
 use ai;
 use geom;
@@ -36,6 +36,7 @@ pub struct Soldier {
     pub reap_timer: f32,
     pub ammo: i32,
     pub food: i32,
+    pub eat_timer: f32,
 }
 
 pub const GROUND_NUM_TILES: i32 = 64;
@@ -43,10 +44,19 @@ pub const TILE_SIZE:   f32 = 16.0;
 
 // times in seconds
 const REINFORCEMENT_TIME: i32 = 60;
-const EAT_TIME: i32           = 479;
+pub const EAT_TIME: f32       = 479.0;
 const DAY_TIME: f32           = 60.0 * 24.0;
+const SUPPLY_TIME: i32        = 1; // how often are supplies picked up
 
 const MAX_SOLDIERS_PER_SIDE: i32 = 40;
+pub const SOLDIER_SPEED: f32 = 1.3; // m/s
+
+pub const SUPPLY_DISTANCE: f32 = 5.0; // distance where supply can be picked up
+const SUPPLY_MAX_FOOD: i32 = 800;
+const SUPPLY_MAX_AMMO: i32 = 4000;
+
+const SOLDIER_MAX_FOOD: i32 = 8;
+const SOLDIER_MAX_AMMO: i32 = 40;
 
 pub struct Ground {
     height: [[f32; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize],
@@ -133,9 +143,27 @@ pub enum FlagState {
 }
 
 pub struct Flag {
-    pub position: Vector2<f32>,
+    pub position: Vector3<f32>,
     pub flag_state: FlagState,
     flag_timer: f32,
+}
+
+pub struct SupplyPoint {
+    pub position: Vector3<f32>,
+    pub amount_food: i32,
+    pub amount_ammo: i32,
+}
+
+impl SupplyPoint {
+    fn add_food(&mut self, i: i32) {
+        self.amount_food += i;
+        self.amount_food = std::cmp::min(self.amount_food, SUPPLY_MAX_FOOD);
+    }
+
+    fn add_ammo(&mut self, i: i32) {
+        self.amount_ammo += i;
+        self.amount_ammo = std::cmp::min(self.amount_ammo, SUPPLY_MAX_AMMO);
+    }
 }
 
 pub struct Battlefield {
@@ -152,6 +180,7 @@ pub struct Battlefield {
     time_accel: f32,
     rng: rand::StdRng,
     base_position: [Vector3<f32>; 2],
+    pub supply_points: Vec<SupplyPoint>
 }
 
 pub struct GameState {
@@ -163,13 +192,15 @@ impl GameState {
     pub fn new(d: glium::Display) -> GameState {
         let seed = std::env::args().last().unwrap_or(String::from("")).parse::<usize>().unwrap_or(21);
         let mut rng = rand::StdRng::from_seed(&[seed]);
+        let ground = init_ground();
+
         let cpx = GROUND_NUM_TILES as f32 * TILE_SIZE * 0.5;
         let cpy = GROUND_NUM_TILES as f32 * TILE_SIZE * 0.5;
         let mut flag_positions = Vec::new();
         for _ in 0..10 {
             let xp = (rng.gen::<f32>() * 0.8 + 0.1) * GROUND_NUM_TILES as f32 * TILE_SIZE;
-            let yp = (rng.gen::<f32>() * 0.8 + 0.1) * GROUND_NUM_TILES as f32 * TILE_SIZE;
-            flag_positions.push(Vector2::new(xp, yp));
+            let zp = (rng.gen::<f32>() * 0.8 + 0.1) * GROUND_NUM_TILES as f32 * TILE_SIZE;
+            flag_positions.push(Vector3::new(xp, get_height_at(&ground, xp, zp), zp));
         }
         let flags = flag_positions.into_iter().map(|p| Flag {
             position: p,
@@ -177,12 +208,15 @@ impl GameState {
             flag_timer: FLAG_TIMER,
         }).collect();
 
-        let ground = init_ground();
         let bx0 = 20.0;
         let bx1 = GROUND_NUM_TILES as f32 * TILE_SIZE - 20.0;
         let bz = GROUND_NUM_TILES as f32 * TILE_SIZE * 0.5;
         let by0 = get_height_at(&ground, bx0, bz);
         let by1 = get_height_at(&ground, bx1, bz);
+        let base_positions = [
+            Vector3::new(bx0, by0, bz),
+            Vector3::new(bx1, by1, bz),
+        ];
 
         let mut gs = {
             let bf = Battlefield {
@@ -204,10 +238,12 @@ impl GameState {
                 flags: flags,
                 time_accel: 1.0,
                 rng: rng,
-                base_position: [
-                    Vector3::new(bx0, by0, bz),
-                    Vector3::new(bx1, by1, bz)
-                ],
+                base_position: base_positions,
+                supply_points: base_positions.iter().map(|p| SupplyPoint {
+                    position: *p,
+                    amount_food: 0,
+                    amount_ammo: 0,
+                }).collect(),
             };
             let ai = AiState {
                 soldier_ai: vec![],
@@ -254,13 +290,6 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
                     glium::glutin::VirtualKeyCode::D => game_state.bf.camera.speed.x = cam_speed(game_state.bf.camera.fast),
                     glium::glutin::VirtualKeyCode::Q => game_state.bf.camera.speed.y = cam_speed(game_state.bf.camera.fast),
                     glium::glutin::VirtualKeyCode::E => game_state.bf.camera.speed.y = -cam_speed(game_state.bf.camera.fast),
-                    glium::glutin::VirtualKeyCode::M => kill_soldier(&mut game_state.bf.soldiers[0]),
-                    glium::glutin::VirtualKeyCode::N => spawn_soldier(game_state.bf.camera.position,
-                                                                      &mut game_state.bf.soldiers,
-                                                                      &mut game_state.ai.soldier_ai, Side::Red),
-                    glium::glutin::VirtualKeyCode::B => spawn_soldier(game_state.bf.camera.position,
-                                                                      &mut game_state.bf.soldiers,
-                                                                      &mut game_state.ai.soldier_ai, Side::Blue),
                     glium::glutin::VirtualKeyCode::Add      => game_state.bf.time_accel = change_time_accel(game_state.bf.time_accel, true),
                     glium::glutin::VirtualKeyCode::Subtract => game_state.bf.time_accel = change_time_accel(game_state.bf.time_accel, false),
                     glium::glutin::VirtualKeyCode::P => println!("Position: {}\nTime: {} {}",
@@ -341,7 +370,7 @@ fn check_flags(gs: &mut GameState) -> () {
         let mut holding = [false, false];
         for sold in gs.bf.soldiers.iter() {
             if sold.alive {
-                let dist = (flag.position - Vector2::<f32>::new(sold.position.x, sold.position.z)).norm();
+                let dist = gameutil::dist(&sold, &flag.position);
                 if dist < 20.0 {
                     holding[if sold.side == Side::Blue { 0 } else { 1 }] = true;
                 }
@@ -386,7 +415,7 @@ fn check_winner(game_state: &mut GameState) -> () {
 fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
     let actions = get_actions(&mut game_state.ai, &game_state.bf);
     for action in actions {
-        execute_action(&action, &mut game_state.bf);
+        execute_action(&action, &mut game_state.bf, prev_curr_time);
     }
     for ref mut sold in &mut game_state.bf.soldiers {
         sold.position.y = f32::max(0.0, get_height_at(&game_state.bf.ground, sold.position.x, sold.position.z)) + 0.5;
@@ -404,10 +433,15 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
                 game_state.bf.soldiers.swap_remove(i);
                 reaped = true;
             }
-        } else if has_tick(game_state, prev_curr_time, EAT_TIME) {
-            game_state.bf.soldiers[i].food -= 1;
-            if game_state.bf.soldiers[i].food < 0 {
-                game_state.bf.soldiers[i].alive = false;
+        } else {
+            game_state.bf.soldiers[i].eat_timer -= game_state.bf.frame_time as f32;
+            if game_state.bf.soldiers[i].eat_timer <= 0.0 {
+                game_state.bf.soldiers[i].eat_timer += EAT_TIME;
+                game_state.bf.soldiers[i].food -= 1;
+                if game_state.bf.soldiers[i].food < 0 {
+                    println!("Soldier starved!");
+                    kill_soldier(&mut game_state.bf.soldiers[i]);
+                }
             }
         }
     }
@@ -418,17 +452,35 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
     }
 }
 
-fn execute_action(action: &ai::Action, bf: &mut Battlefield) -> () {
+fn execute_action(action: &ai::Action, bf: &mut Battlefield, prev_curr_time: f64) -> () {
     match action {
-        &ai::Action::NoAction(s)           => idle_soldier(&mut bf.soldiers[s], bf.frame_time),
-        &ai::Action::MoveAction(s, diff)   => bf.soldiers[s].position += diff,
+        &ai::Action::NoAction(s)           => idle_soldier(bf, s, prev_curr_time),
+        &ai::Action::MoveAction(s, diff)   => bf.soldiers[s].position += gameutil::truncate(diff, SOLDIER_SPEED * bf.frame_time as f32),
         &ai::Action::ShootAction(from, to) => shoot_soldier(from, to, bf),
     }
 }
 
-fn idle_soldier(soldier: &mut Soldier, frame_time: f64) -> () {
+fn idle_soldier(bf: &mut Battlefield, sid: usize, prev_curr_time: f64) -> () {
+    let check_supply = has_tick(bf, prev_curr_time, SUPPLY_TIME);
+    let ref mut soldier = bf.soldiers[sid];
     if soldier.shot_timer > 0.0 {
-        soldier.shot_timer -= frame_time as f32;
+        soldier.shot_timer -= bf.frame_time as f32;
+    }
+
+    if check_supply {
+        for ref mut supply in &mut bf.supply_points {
+            let dist = gameutil::dist(soldier, &supply.position);
+            if dist < SUPPLY_DISTANCE {
+                if soldier.food <= SOLDIER_MAX_FOOD - 1  && supply.amount_food >= 1 {
+                    soldier.food += 1;
+                    supply.amount_food -= 1;
+                }
+                if soldier.ammo <= SOLDIER_MAX_AMMO - 10 && supply.amount_ammo >= 10 {
+                    soldier.ammo += 10;
+                    supply.amount_ammo -= 10;
+                }
+            }
+        }
     }
 }
 
@@ -448,10 +500,17 @@ fn shoot_soldier(from: usize, to: usize, bf: &mut Battlefield) {
         let threshold = if dist > 100.0 { 0.0 } else { -dist * 0.005 + 1.0 };
         let hit_num = bf.rng.gen::<f32>();
         if hit_num < threshold {
-            bf.soldiers[to].alive = false;
+            kill_soldier(&mut bf.soldiers[to]);
         }
         println!("{} shoots at {}! {} ({} - threshold was {})",
         from, to, hit_num, !bf.soldiers[to].alive, threshold);
+    }
+}
+
+fn add_supplies(gs: &mut GameState) -> () {
+    for i in 0..2 {
+        gs.bf.supply_points[i].add_food(10);
+        gs.bf.supply_points[i].add_ammo(100);
     }
 }
 
@@ -479,6 +538,7 @@ fn spawn_soldier(pos: Vector3<f32>, soldiers: &mut Vec<Soldier>, soldier_ai: &mu
         reap_timer: 10.0,
         ammo: 40,
         food: 8,
+        eat_timer: EAT_TIME,
     };
     soldiers.push(s);
     soldier_ai.push(ai::SoldierAI::new());
@@ -502,15 +562,16 @@ fn change_time_accel(time_accel: f32, incr: bool) -> f32 {
 }
 
 // true every <tick> seconds
-fn has_tick(gs: &GameState, prev_curr_time: f64, tick: i32) -> bool {
-    let pt = prev_curr_time  as u64 / tick as u64;
-    let ct = gs.bf.curr_time as u64 / tick as u64;
+fn has_tick(bf: &Battlefield, prev_curr_time: f64, tick: i32) -> bool {
+    let pt = prev_curr_time as u64 / tick as u64;
+    let ct = bf.curr_time   as u64 / tick as u64;
     pt != ct
 }
 
 fn spawn_reinforcements(mut gs: &mut GameState, prev_curr_time: f64) -> () {
-    if has_tick(gs, prev_curr_time, REINFORCEMENT_TIME) {
+    if has_tick(&gs.bf, prev_curr_time, REINFORCEMENT_TIME) {
         init_soldiers(&mut gs, 2);
+        add_supplies(&mut gs);
         println!("Reinforcements have arrived!");
     }
 }
