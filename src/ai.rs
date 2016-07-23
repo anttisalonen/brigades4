@@ -12,8 +12,8 @@ use game::{Soldier, Battlefield, FlagState};
 use gameutil;
 
 const SHOOT_DISTANCE: f32 = 100.0;
-const REPLAN_TIME: f64 = 120.0; // seconds
-const FOOD_FETCH_BUFFER: f32 = 480.0; // seconds
+const REPLAN_TIME: f64       = game::TIME_MULTIPLIER as f64 * 120.0; // seconds
+const FOOD_FETCH_BUFFER: f32 = game::TIME_MULTIPLIER as f32 * 480.0; // seconds
 
 // data structures
 pub struct SoldierAI {

@@ -39,14 +39,18 @@ pub struct Soldier {
     pub eat_timer: f32,
 }
 
-pub const GROUND_NUM_TILES: i32 = 64;
-pub const TILE_SIZE:   f32 = 16.0;
+pub const GROUND_NUM_TILES: i32 = 128;
+pub const TILE_SIZE:   f32 = 128.0;
+
+const CAM_SPEED_FACTOR: f32 = 100.0;
+const CAM_SPEED: f32        = 30.0;
 
 // times in seconds
-const REINFORCEMENT_TIME: i32 = 60;
-pub const EAT_TIME: f32       = 479.0;
-const DAY_TIME: f32           = 60.0 * 24.0;
-const SUPPLY_TIME: i32        = 1; // how often are supplies picked up
+pub const TIME_MULTIPLIER: i32 = 60;
+const REINFORCEMENT_TIME: i32  = TIME_MULTIPLIER * 60;
+pub const EAT_TIME: f32        = TIME_MULTIPLIER as f32 * 479.0;
+const DAY_TIME: f32            = TIME_MULTIPLIER as f32 * 60.0 * 24.0;
+const SUPPLY_TIME: i32         = TIME_MULTIPLIER * 1; // how often are supplies picked up
 
 const MAX_SOLDIERS_PER_SIDE: i32 = 40;
 pub const SOLDIER_SPEED: f32 = 1.3; // m/s
@@ -67,28 +71,29 @@ pub fn init_ground() -> Ground {
     for j in 0..GROUND_NUM_TILES as usize {
         for i in 0..GROUND_NUM_TILES as usize {
             g.height[i][j] =
-                f32::sin(i as f32 * 0.3) * 30.0 +
-                f32::cos(j as f32 * 0.2) * -25.0 + 30.0;
+                f32::sin(i as f32 * 0.10) * 200.0 +
+                f32::cos(j as f32 * 0.15) * 150.0 + 300.0;
         }
     }
     g
 }
 
-pub fn get_ground_geometry(ground: &Ground) -> geom::Geom {
-    let gu = GROUND_NUM_TILES as usize;
+pub fn get_landscape_geometry<F>(num_tiles: i32, scale: f32, height: F) -> geom::Geom
+    where F : Fn(i32, i32) -> f32 {
+    let gu = num_tiles as usize;
     let mut geo = geom::new_geom(gu * gu, (gu - 1) * (gu - 1) * 6);
     for j in 0..gu {
         for i in 0..gu {
             geo.vertices[j * gu + i] = geom::Vertex{position:
-                (i as f32 * TILE_SIZE,
-                get_height_at_i(ground, i as i32, j as i32),
-                j as f32 * TILE_SIZE)
+                (i as f32 * scale,
+                height(i as i32, j as i32),
+                j as f32 * scale)
             };
 
-            let dy_x = get_height_at_i(ground, i as i32 + 1, j as i32)     - get_height_at_i(ground, i as i32 - 1, j as i32);
-            let dy_z = get_height_at_i(ground, i as i32    , j as i32 + 1) - get_height_at_i(ground, i as i32,     j as i32 - 1);
-            let norm_x = Vector3::new(2.0 * TILE_SIZE, dy_x, 0.0);
-            let norm_z = Vector3::new(0.0, dy_z, 2.0 * TILE_SIZE);
+            let dy_x = height(i as i32 + 1, j as i32)     - height(i as i32 - 1, j as i32);
+            let dy_z = height(i as i32    , j as i32 + 1) - height(i as i32,     j as i32 - 1);
+            let norm_x = Vector3::new(2.0 * scale, dy_x, 0.0);
+            let norm_z = Vector3::new(0.0, dy_z, 2.0 * scale);
             let norm = norm_z.cross(&norm_x);
             let norm = norm.normalize();
             geo.normals[j * gu + i] = geom::Normal{normal: (norm.x, norm.y, norm.z)};
@@ -105,6 +110,14 @@ pub fn get_ground_geometry(ground: &Ground) -> geom::Geom {
         }
     }
     geo
+}
+
+pub fn get_ground_geometry(ground: &Ground) -> geom::Geom {
+    get_landscape_geometry(GROUND_NUM_TILES, TILE_SIZE, |x, y| get_height_at_i(ground, x, y))
+}
+
+pub fn get_water_geometry() -> geom::Geom {
+    get_landscape_geometry(GROUND_NUM_TILES / 4, TILE_SIZE * 4.0, |_, _| 0.0)
 }
 
 pub fn get_height_at_i(ground: &Ground, x: i32, y: i32) -> f32 {
@@ -166,9 +179,16 @@ impl SupplyPoint {
     }
 }
 
+#[derive(PartialEq, Eq, Copy, Clone)]
+pub enum ViewMode {
+    Normal,
+    Strategic,
+}
+
 pub struct Battlefield {
     pub display: glium::Display,
     pub camera: Camera,
+    pub view_mode: ViewMode,
     pub mouse_look: bool,
     pub prev_mouse_position: Option<(i32, i32)>,
     pub soldiers: Vec<Soldier>,
@@ -177,7 +197,7 @@ pub struct Battlefield {
     pub frame_time: f64,
     winner: Option<Side>,
     pub flags: Vec<Flag>,
-    time_accel: f32,
+    time_accel: i32,
     rng: rand::StdRng,
     base_position: [Vector3<f32>; 2],
     pub supply_points: Vec<SupplyPoint>
@@ -194,12 +214,11 @@ impl GameState {
         let mut rng = rand::StdRng::from_seed(&[seed]);
         let ground = init_ground();
 
-        let cpx = GROUND_NUM_TILES as f32 * TILE_SIZE * 0.5;
-        let cpy = GROUND_NUM_TILES as f32 * TILE_SIZE * 0.5;
+        let dim = GROUND_NUM_TILES as f32 * TILE_SIZE;
         let mut flag_positions = Vec::new();
         for _ in 0..10 {
-            let xp = (rng.gen::<f32>() * 0.8 + 0.1) * GROUND_NUM_TILES as f32 * TILE_SIZE;
-            let zp = (rng.gen::<f32>() * 0.8 + 0.1) * GROUND_NUM_TILES as f32 * TILE_SIZE;
+            let xp = (rng.gen::<f32>() * 0.8 + 0.1) * dim;
+            let zp = (rng.gen::<f32>() * 0.8 + 0.1) * dim;
             flag_positions.push(Vector3::new(xp, get_height_at(&ground, xp, zp), zp));
         }
         let flags = flag_positions.into_iter().map(|p| Flag {
@@ -209,8 +228,8 @@ impl GameState {
         }).collect();
 
         let bx0 = 20.0;
-        let bx1 = GROUND_NUM_TILES as f32 * TILE_SIZE - 20.0;
-        let bz = GROUND_NUM_TILES as f32 * TILE_SIZE * 0.5;
+        let bx1 = dim - 20.0;
+        let bz = dim * 0.5;
         let by0 = get_height_at(&ground, bx0, bz);
         let by1 = get_height_at(&ground, bx1, bz);
         let base_positions = [
@@ -222,21 +241,24 @@ impl GameState {
             let bf = Battlefield {
                 display: d,
                 camera: Camera {
-                    position:  Vector3::new(cpx, cpy, 0.0),
-                    direction: Vector3::new(0.0, -0.866, 0.5),
+                    position:  Vector3::new(0.0,
+                                            get_height_at(&ground, 0.0, dim * 0.5) + 70.0,
+                                            dim * 0.5),
+                    direction: Vector3::new(1.0, 0.0, 0.0),
                     upvec:     Vector3::new(0.0, 1.0, 0.0),
                     speed:     Vector3::new(0.0, 0.0, 0.0),
                     fast:      false,
                 },
+                view_mode: ViewMode::Normal,
                 mouse_look: false,
                 prev_mouse_position: None,
                 soldiers: vec![],
                 ground: ground,
-                curr_time: 360.0,
+                curr_time: TIME_MULTIPLIER as f64 * 360.0,
                 frame_time: 0.0,
                 winner: None,
                 flags: flags,
-                time_accel: 1.0,
+                time_accel: 1,
                 rng: rng,
                 base_position: base_positions,
                 supply_points: base_positions.iter().map(|p| SupplyPoint {
@@ -264,12 +286,14 @@ pub fn won(game_state: &GameState) -> Option<Side> {
 }
 
 pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
-    game_state.bf.frame_time = frame_time * game_state.bf.time_accel as f64;
-    let prev_curr_time = game_state.bf.curr_time;
-    game_state.bf.curr_time += frame_time * game_state.bf.time_accel as f64;
-    spawn_reinforcements(game_state, prev_curr_time);
-    update_soldiers(game_state, prev_curr_time);
-    check_winner(game_state);
+    for _ in 0..game_state.bf.time_accel {
+        game_state.bf.frame_time = frame_time;
+        let prev_curr_time = game_state.bf.curr_time;
+        game_state.bf.curr_time += frame_time;
+        spawn_reinforcements(game_state, prev_curr_time);
+        update_soldiers(game_state, prev_curr_time);
+        check_winner(game_state);
+    }
 
     game_state.bf.camera.position += na::rotate(
         &Rotation3::new_observer_frame(&game_state.bf.camera.direction,
@@ -296,6 +320,7 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
                                                                  game_state.bf.camera.position,
                                                                  game_state.bf.curr_time,
                                                                  curr_day_time_str(game_state)),
+                    glium::glutin::VirtualKeyCode::Z => game_state.bf.view_mode = toggle_view_mode(game_state.bf.view_mode),
                     glium::glutin::VirtualKeyCode::RShift => cam_speed_up(&mut game_state.bf.camera),
                     glium::glutin::VirtualKeyCode::LShift => cam_speed_up(&mut game_state.bf.camera),
                     _ => ()
@@ -393,6 +418,10 @@ fn check_flags(gs: &mut GameState) -> () {
 }
 
 fn check_winner(game_state: &mut GameState) -> () {
+    if game_state.bf.winner != None {
+        return;
+    }
+
     check_flags(game_state);
     let mut holding: [usize; 2] = [0, 0];
     for flag in game_state.bf.flags.iter() {
@@ -544,20 +573,20 @@ fn spawn_soldier(pos: Vector3<f32>, soldiers: &mut Vec<Soldier>, soldier_ai: &mu
     soldier_ai.push(ai::SoldierAI::new());
 }
 
-fn change_time_accel(time_accel: f32, incr: bool) -> f32 {
-    if time_accel < 0.2 && !incr {
+fn change_time_accel(time_accel: i32, incr: bool) -> i32 {
+    if time_accel <= 1 && !incr {
         return time_accel;
     }
-    if time_accel > 100.0 && incr {
+    if time_accel > 80 * TIME_MULTIPLIER && incr {
         return time_accel;
     }
 
     if incr {
-        println!("Time acceleration: {}", time_accel * 2.0);
-        time_accel * 2.0
+        println!("Time acceleration: {}", time_accel * 2);
+        time_accel * 2
     } else {
-        println!("Time acceleration: {}", time_accel * 0.5);
-        time_accel * 0.5
+        println!("Time acceleration: {}", time_accel / 2);
+        time_accel / 2
     }
 }
 
@@ -591,19 +620,26 @@ pub fn curr_day_time(gs: &GameState) -> f32 {
 
 fn cam_speed(fast: bool) -> f32 {
     if fast {
-        300.0
+        CAM_SPEED * CAM_SPEED_FACTOR
     } else {
-        30.0
+        CAM_SPEED
     }
 }
 
 fn cam_slow_down(mut cam: &mut Camera) -> () {
     cam.fast = false;
-    cam.speed /= 10.0;
+    cam.speed /= CAM_SPEED_FACTOR;
 }
 
 fn cam_speed_up(mut cam: &mut Camera) -> () {
     cam.fast = true;
-    cam.speed *= 10.0;
+    cam.speed *= CAM_SPEED_FACTOR;
+}
+
+fn toggle_view_mode(vm: ViewMode) -> ViewMode {
+    match vm {
+        ViewMode::Normal    => ViewMode::Strategic,
+        ViewMode::Strategic => ViewMode::Normal,
+    }
 }
 

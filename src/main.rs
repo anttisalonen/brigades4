@@ -23,13 +23,29 @@ const WATER_MODEL_MATRIX: [[f32; 4]; 4] = {
     ]
 };
 
-fn icon_model_matrix(pos: &Vector3<f32>) -> [[f32; 4]; 4] {
-    let yp = f32::max(pos.y, 0.0) + 10.0;
+fn view_mode_to_scale(vm: game::ViewMode) -> [f32; 3] {
+    match vm {
+        game::ViewMode::Normal    => [1.0,  1.0,  1.0f32],
+        game::ViewMode::Strategic => [40.0, 40.0, 40.0f32],
+    }
+}
+
+fn view_mode_ambient_light(vm: game::ViewMode, default: f32) -> f32 {
+    match vm {
+        game::ViewMode::Normal    => default,
+        game::ViewMode::Strategic => 0.8,
+    }
+}
+
+
+fn icon_model_matrix(pos: &Vector3<f32>, vm: game::ViewMode) -> [[f32; 4]; 4] {
+    let scale = view_mode_to_scale(vm);
+    let yp = f32::max(pos.y, 0.0) + 20.0;
     [
-        [24.0, 0.0,  0.0,  0.0],
-        [0.0,  24.0, 0.0,  0.0],
-        [0.0,  0.0,  24.0, 0.0],
-        [pos.x, f32::max(yp, 0.0) + 10.0, pos.z, 1.0f32]
+        [scale[0] * 24.0, 0.0,                      0.0,             0.0],
+        [0.0,             scale[1] * 24.0,          0.0,             0.0],
+        [0.0,             0.0,                      scale[2] * 24.0, 0.0],
+        [pos.x,           f32::max(yp, 0.0) + 10.0, pos.z,           1.0f32]
     ]
 }
 
@@ -43,35 +59,29 @@ fn flag_color(flag: &game::Flag) -> [f32; 3] {
     }
 }
 
-fn soldier_model_matrix(s: &Soldier) -> [[f32; 4]; 4] {
+fn soldier_model_matrix(s: &Soldier, vm: game::ViewMode) -> [[f32; 4]; 4] {
+    let scale = view_mode_to_scale(vm);
     [
-        [f32::cos(s.direction), 0.0, f32::sin(s.direction), 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [-f32::sin(s.direction), 0.0, f32::cos(s.direction), 0.0],
+        [scale[0] * f32::cos(s.direction), 0.0, f32::sin(s.direction), 0.0],
+        [0.0, scale[1] * 2.0, 0.0, 0.0],
+        [-f32::sin(s.direction), 0.0, scale[2] * f32::cos(s.direction), 0.0],
         [s.position.x, s.position.y, s.position.z, 1.0f32]
     ]
 }
 
-const WATER_VERTICES: [geom::Vertex; 4] = [
-    geom::Vertex { position: (0.0, 0.0, 0.0) },
-    geom::Vertex { position: (1.0, 0.0, 0.0) },
-    geom::Vertex { position: (0.0, 0.0, 1.0) },
-    geom::Vertex { position: (1.0, 0.0, 1.0) },
+const ICON_VERTICES: [geom::TexVertex; 4] = [
+    geom::TexVertex { position: (-0.5, 0.0, -0.5), tex_coords: (0.0, 0.0) },
+    geom::TexVertex { position: (0.5,  0.0, -0.5), tex_coords: (1.0, 0.0) },
+    geom::TexVertex { position: (-0.5, 0.0,  0.5), tex_coords: (0.0, 1.0) },
+    geom::TexVertex { position: (0.5,  0.0,  0.5), tex_coords: (1.0, 1.0) },
 ];
 
-const FLAG_VERTICES: [geom::TexVertex; 4] = [
-    geom::TexVertex { position: (0.0, 0.0, 0.0), tex_coords: (0.0, 0.0) },
-    geom::TexVertex { position: (1.0, 0.0, 0.0), tex_coords: (1.0, 0.0) },
-    geom::TexVertex { position: (0.0, 0.0, 1.0), tex_coords: (0.0, 1.0) },
-    geom::TexVertex { position: (1.0, 0.0, 1.0), tex_coords: (1.0, 1.0) },
-];
-
-const WATER_NORMALS: [geom::Normal; 2] = [
+const ICON_NORMALS: [geom::Normal; 2] = [
     geom::Normal { normal: ( 0.0, 1.0, 0.0) },
     geom::Normal { normal: ( 0.0, 1.0, 0.0) },
 ];
 
-const WATER_INDICES: [u16; 6] = [
+const ICON_INDICES: [u16; 6] = [
     1, 0, 2,
     3, 1, 2,
 ];
@@ -85,8 +95,8 @@ const IDENTITY_MATRIX: [[f32; 4]; 4] = [
 
 struct Gfx {
     icon_positions: glium::VertexBuffer<geom::TexVertex>,
-    water_normals: glium::VertexBuffer<geom::Normal>,
-    water_indices: glium::IndexBuffer<u16>,
+    icon_normals: glium::VertexBuffer<geom::Normal>,
+    icon_indices: glium::IndexBuffer<u16>,
     program: glium::Program,
     icon_program: glium::Program,
 }
@@ -206,12 +216,16 @@ fn main() {
     let ground_indices = glium::IndexBuffer::new(&game_state.bf.display, glium::index::PrimitiveType::TrianglesList,
                                           &ground_geom.indices).unwrap();
 
-    let water_positions = glium::VertexBuffer::new(&game_state.bf.display, &WATER_VERTICES).unwrap();
-    let water_normals = glium::VertexBuffer::new(&game_state.bf.display, &WATER_NORMALS).unwrap();
+    let water_geom = game::get_water_geometry();
+    let water_positions = glium::VertexBuffer::new(&game_state.bf.display, &water_geom.vertices).unwrap();
+    let water_normals = glium::VertexBuffer::new(&game_state.bf.display, &water_geom.normals).unwrap();
     let water_indices = glium::IndexBuffer::new(&game_state.bf.display, glium::index::PrimitiveType::TrianglesList,
-                                          &WATER_INDICES).unwrap();
+                                          &water_geom.indices).unwrap();
 
-    let icon_positions = glium::VertexBuffer::new(&game_state.bf.display, &FLAG_VERTICES).unwrap();
+    let icon_positions = glium::VertexBuffer::new(&game_state.bf.display, &ICON_VERTICES).unwrap();
+    let icon_normals = glium::VertexBuffer::new(&game_state.bf.display, &ICON_NORMALS).unwrap();
+    let icon_indices = glium::IndexBuffer::new(&game_state.bf.display, glium::index::PrimitiveType::TrianglesList,
+                                          &ICON_INDICES).unwrap();
 
     let params = glium::DrawParameters {
         depth: glium::Depth {
@@ -234,8 +248,8 @@ fn main() {
 
     let gfx = Gfx {
         icon_positions: icon_positions,
-        water_normals: water_normals,
-        water_indices: water_indices,
+        icon_normals: icon_normals,
+        icon_indices: icon_indices,
         program: program,
         icon_program: icon_program,
     };
@@ -266,8 +280,8 @@ fn main() {
             let aspect_ratio = height as f32 / width as f32;
 
             let fov: f32 = 3.141592 / 3.0;
-            let zfar = 1024.0;
-            let znear = 0.1;
+            let zfar = 16384.0;
+            let znear = 4.0;
 
             let f = 1.0 / (fov / 2.0).tan();
 
@@ -299,23 +313,25 @@ fn main() {
         // flag
         for flag in game_state.bf.flags.iter() {
             draw_icon(&gfx, &mut gfx_per_frame, &flag.position,
+                      game_state.bf.view_mode,
                       flag_color(&flag), &flag_texture, &icon_params);
         }
 
         // supply
         for supply in game_state.bf.supply_points.iter() {
             draw_icon(&gfx, &mut gfx_per_frame, &supply.position,
+                      game_state.bf.view_mode,
                       [1.0, 1.0, 1.0], &food_texture, &icon_params);
         }
 
 
         // water
-        draw_model(&gfx, &mut gfx_per_frame, &water_positions, &gfx.water_normals, &gfx.water_indices,
-                   &WATER_MODEL_MATRIX, [0.0, 0.0, 0.9f32], &params);
+        draw_model(&gfx, &mut gfx_per_frame, &water_positions, &water_normals, &water_indices,
+                   &WATER_MODEL_MATRIX, [0.0, 0.0, 0.9f32], game::ViewMode::Normal, &params);
 
         // ground
         draw_model(&gfx, &mut gfx_per_frame, &ground_positions, &ground_normals, &ground_indices,
-                   &IDENTITY_MATRIX, [0.2, 0.8, 0.2f32], &params);
+                   &IDENTITY_MATRIX, [0.2, 0.8, 0.2f32], game::ViewMode::Normal, &params);
 
         for sold in game_state.bf.soldiers.iter() {
             let col = if sold.alive {
@@ -328,7 +344,8 @@ fn main() {
                 [0.0, 0.0, 0.0f32]
             };
             draw_model(&gfx, &mut gfx_per_frame, &positions, &normals, &indices,
-                       &soldier_model_matrix(&sold), col, &params);
+                       &soldier_model_matrix(&sold, game_state.bf.view_mode), col,
+                       game_state.bf.view_mode, &params);
         }
         gfx_per_frame.target.finish().unwrap();
     }
@@ -366,15 +383,17 @@ fn view_matrix(position: &Vector3<f32>, direction: &Vector3<f32>, up: &Vector3<f
 
 fn draw_icon(gfx: &Gfx, mut gfx_per_frame: &mut GfxPerFrame,
              position: &Vector3<f32>,
+             vm: game::ViewMode,
              color: [f32; 3], texture: &glium::Texture2d, params: &glium::DrawParameters) -> () {
     use glium::{Surface};
-    gfx_per_frame.target.draw((&gfx.icon_positions, &gfx.water_normals), &gfx.water_indices, &gfx.icon_program,
+    let ambient = view_mode_ambient_light(vm, gfx_per_frame.ambient);
+    gfx_per_frame.target.draw((&gfx.icon_positions, &gfx.icon_normals), &gfx.icon_indices, &gfx.icon_program,
         &uniform! {
-            model: icon_model_matrix(&position),
+            model: icon_model_matrix(&position, vm),
             view: gfx_per_frame.view,
             perspective: gfx_per_frame.perspective,
             u_light: gfx_per_frame.light,
-            u_ambient: gfx_per_frame.ambient,
+            u_ambient: ambient,
             u_color: color,
             tex: texture,
         },
@@ -386,15 +405,16 @@ fn draw_model(gfx: &Gfx, mut gfx_per_frame: &mut GfxPerFrame,
     normals: &glium::VertexBuffer<geom::Normal>,
     indices: &glium::IndexBuffer<u16>,
     model: &[[f32; 4]; 4],
-    color: [f32; 3], params: &glium::DrawParameters) -> () {
+    color: [f32; 3], vm: game::ViewMode, params: &glium::DrawParameters) -> () {
     use glium::{Surface};
+    let ambient = view_mode_ambient_light(vm, gfx_per_frame.ambient);
     gfx_per_frame.target.draw((positions, normals), indices, &gfx.program,
         &uniform! {
             model: *model,
             view: gfx_per_frame.view,
             perspective: gfx_per_frame.perspective,
             u_light: gfx_per_frame.light,
-            u_ambient: gfx_per_frame.ambient,
+            u_ambient: ambient,
             u_color: color
         },
         &params).unwrap();
