@@ -27,35 +27,38 @@ pub enum Side {
 }
 
 pub struct Soldier {
-    pub position: Vector3<f32>,
-    pub direction: f32,
+    pub position: Vector3<f64>,
+    pub direction: f64,
     pub alive: bool,
     pub side: Side,
     pub id: usize,
-    pub shot_timer: f32,
-    pub reap_timer: f32,
+    pub shot_timer: f64,
+    pub reap_timer: f64,
     pub ammo: i32,
     pub food: i32,
-    pub eat_timer: f32,
+    pub eat_timer: f64,
 }
 
 pub const GROUND_NUM_TILES: i32 = 128;
-pub const TILE_SIZE:   f32 = 128.0;
+pub const TILE_SIZE:   f64 = 1024.0;
 
-const CAM_SPEED_FACTOR: f32 = 100.0;
+pub const DIM:  f64 = GROUND_NUM_TILES as f64 * TILE_SIZE;
+pub const HDIM: f64 = DIM * 0.5;
+
+const CAM_SPEED_FACTOR: f32 = 500.0;
 const CAM_SPEED: f32        = 30.0;
 
 // times in seconds
 pub const TIME_MULTIPLIER: i32 = 60;
 const REINFORCEMENT_TIME: i32  = TIME_MULTIPLIER * 60;
-pub const EAT_TIME: f32        = TIME_MULTIPLIER as f32 * 479.0;
-const DAY_TIME: f32            = TIME_MULTIPLIER as f32 * 60.0 * 24.0;
+pub const EAT_TIME: f64        = TIME_MULTIPLIER as f64 * 479.0;
+const DAY_TIME: f64            = TIME_MULTIPLIER as f64 * 60.0 * 24.0;
 const SUPPLY_TIME: i32         = TIME_MULTIPLIER * 1; // how often are supplies picked up
 
 const MAX_SOLDIERS_PER_SIDE: i32 = 40;
-pub const SOLDIER_SPEED: f32 = 1.3; // m/s
+pub const SOLDIER_SPEED: f64 = 1.3; // m/s
 
-pub const SUPPLY_DISTANCE: f32 = 5.0; // distance where supply can be picked up
+pub const SUPPLY_DISTANCE: f64 = 5.0; // distance where supply can be picked up
 const SUPPLY_MAX_FOOD: i32 = 800;
 const SUPPLY_MAX_AMMO: i32 = 4000;
 
@@ -63,7 +66,7 @@ const SOLDIER_MAX_FOOD: i32 = 8;
 const SOLDIER_MAX_AMMO: i32 = 40;
 
 pub struct Ground {
-    height: [[f32; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize],
+    height: [[f64; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize],
 }
 
 pub fn init_ground() -> Ground {
@@ -71,29 +74,29 @@ pub fn init_ground() -> Ground {
     for j in 0..GROUND_NUM_TILES as usize {
         for i in 0..GROUND_NUM_TILES as usize {
             g.height[i][j] =
-                f32::sin(i as f32 * 0.10) * 200.0 +
-                f32::cos(j as f32 * 0.15) * 150.0 + 300.0;
+                f64::sin(i as f64 * 0.10)       * 400.0 +
+                f64::cos((i + j) as f64 * 0.15) * 650.0 + 700.0;
         }
     }
     g
 }
 
-pub fn get_landscape_geometry<F>(num_tiles: i32, scale: f32, height: F) -> geom::Geom
-    where F : Fn(i32, i32) -> f32 {
+pub fn get_landscape_geometry<F>(num_tiles: i32, scale: f64, height: F) -> geom::Geom
+    where F : Fn(i32, i32) -> f64 {
     let gu = num_tiles as usize;
     let mut geo = geom::new_geom(gu * gu, (gu - 1) * (gu - 1) * 6);
     for j in 0..gu {
         for i in 0..gu {
             geo.vertices[j * gu + i] = geom::Vertex{position:
-                (i as f32 * scale,
-                height(i as i32, j as i32),
-                j as f32 * scale)
+                ((i as f64 * scale - num_tiles as f64 * scale * 0.5) as f32,
+                height(i as i32, j as i32) as f32,
+                (j as f64 * scale - num_tiles as f64 * scale * 0.5) as f32)
             };
 
             let dy_x = height(i as i32 + 1, j as i32)     - height(i as i32 - 1, j as i32);
             let dy_z = height(i as i32    , j as i32 + 1) - height(i as i32,     j as i32 - 1);
-            let norm_x = Vector3::new(2.0 * scale, dy_x, 0.0);
-            let norm_z = Vector3::new(0.0, dy_z, 2.0 * scale);
+            let norm_x = Vector3::new((2.0 * scale) as f32, dy_x as f32, 0.0);
+            let norm_z = Vector3::new(0.0,                  dy_z as f32, (2.0 * scale) as f32);
             let norm = norm_z.cross(&norm_x);
             let norm = norm.normalize();
             geo.normals[j * gu + i] = geom::Normal{normal: (norm.x, norm.y, norm.z)};
@@ -120,19 +123,19 @@ pub fn get_water_geometry() -> geom::Geom {
     get_landscape_geometry(GROUND_NUM_TILES / 4, TILE_SIZE * 4.0, |_, _| 0.0)
 }
 
-pub fn get_height_at_i(ground: &Ground, x: i32, y: i32) -> f32 {
+pub fn get_height_at_i(ground: &Ground, x: i32, y: i32) -> f64 {
     let ix = gameutil::clamp_i(0, GROUND_NUM_TILES - 1, x) as usize;
     let iy = gameutil::clamp_i(0, GROUND_NUM_TILES - 1, y) as usize;
     return ground.height[ix][iy];
 }
 
-pub fn get_height_at(ground: &Ground, x: f32, y: f32) -> f32 {
-    let x = x / TILE_SIZE;
-    let y = y / TILE_SIZE;
+pub fn get_height_at(ground: &Ground, x: f64, y: f64) -> f64 {
+    let x = x / TILE_SIZE + HDIM;
+    let y = y / TILE_SIZE + HDIM;
     let ix = gameutil::clamp_i(0, GROUND_NUM_TILES - 2, x as i32) as usize;
     let iy = gameutil::clamp_i(0, GROUND_NUM_TILES - 2, y as i32) as usize;
-    let fx = f32::fract(x);
-    let fy = f32::fract(y);
+    let fx = f64::fract(x);
+    let fy = f64::fract(y);
     let h1 = ground.height[ix + 0][iy + 0];
     let h2 = ground.height[ix + 1][iy + 0];
     let h3 = ground.height[ix + 0][iy + 1];
@@ -147,7 +150,7 @@ struct AiState {
     soldier_ai: Vec<ai::SoldierAI>,
 }
 
-const FLAG_TIMER: f32 = 10.0;
+const FLAG_TIMER: f64 = 10.0;
 
 pub enum FlagState {
     Free,
@@ -156,13 +159,13 @@ pub enum FlagState {
 }
 
 pub struct Flag {
-    pub position: Vector3<f32>,
+    pub position: Vector3<f64>,
     pub flag_state: FlagState,
-    flag_timer: f32,
+    flag_timer: f64,
 }
 
 pub struct SupplyPoint {
-    pub position: Vector3<f32>,
+    pub position: Vector3<f64>,
     pub amount_food: i32,
     pub amount_ammo: i32,
 }
@@ -199,7 +202,7 @@ pub struct Battlefield {
     pub flags: Vec<Flag>,
     time_accel: i32,
     rng: rand::StdRng,
-    base_position: [Vector3<f32>; 2],
+    base_position: [Vector3<f64>; 2],
     pub supply_points: Vec<SupplyPoint>
 }
 
@@ -214,11 +217,10 @@ impl GameState {
         let mut rng = rand::StdRng::from_seed(&[seed]);
         let ground = init_ground();
 
-        let dim = GROUND_NUM_TILES as f32 * TILE_SIZE;
         let mut flag_positions = Vec::new();
         for _ in 0..10 {
-            let xp = (rng.gen::<f32>() * 0.8 + 0.1) * dim;
-            let zp = (rng.gen::<f32>() * 0.8 + 0.1) * dim;
+            let xp = (rng.gen::<f64>() * 0.8 + 0.1) * DIM - HDIM;
+            let zp = (rng.gen::<f64>() * 0.8 + 0.1) * DIM - HDIM;
             flag_positions.push(Vector3::new(xp, get_height_at(&ground, xp, zp), zp));
         }
         let flags = flag_positions.into_iter().map(|p| Flag {
@@ -227,9 +229,9 @@ impl GameState {
             flag_timer: FLAG_TIMER,
         }).collect();
 
-        let bx0 = 20.0;
-        let bx1 = dim - 20.0;
-        let bz = dim * 0.5;
+        let bx0 = -HDIM + 20.0;
+        let bx1 =  HDIM - 20.0;
+        let bz  = 0.0;
         let by0 = get_height_at(&ground, bx0, bz);
         let by1 = get_height_at(&ground, bx1, bz);
         let base_positions = [
@@ -241,9 +243,9 @@ impl GameState {
             let bf = Battlefield {
                 display: d,
                 camera: Camera {
-                    position:  Vector3::new(0.0,
-                                            get_height_at(&ground, 0.0, dim * 0.5) + 70.0,
-                                            dim * 0.5),
+                    position:  Vector3::new(-HDIM as f32,
+                                            (get_height_at(&ground, -HDIM, 0.0) + 70.0) as f32,
+                                            0.0),
                     direction: Vector3::new(1.0, 0.0, 0.0),
                     upvec:     Vector3::new(0.0, 1.0, 0.0),
                     speed:     Vector3::new(0.0, 0.0, 0.0),
@@ -403,7 +405,7 @@ fn check_flags(gs: &mut GameState) -> () {
         }
 
         if holding[0] ^ holding[1] {
-            flag.flag_timer -= gs.bf.frame_time as f32;
+            flag.flag_timer -= gs.bf.frame_time as f64;
             let s = if holding[0] { Side::Blue } else { Side::Red };
             if flag.flag_timer <= 0.0 {
                 flag.flag_state = FlagState::Owned(s);
@@ -447,7 +449,7 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
         execute_action(&action, &mut game_state.bf, prev_curr_time);
     }
     for ref mut sold in &mut game_state.bf.soldiers {
-        sold.position.y = f32::max(0.0, get_height_at(&game_state.bf.ground, sold.position.x, sold.position.z)) + 0.5;
+        sold.position.y = f64::max(0.0, get_height_at(&game_state.bf.ground, sold.position.x, sold.position.z)) + 0.5;
     }
 
     let mut reaped = false;
@@ -456,14 +458,14 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
             break;
         }
         if ! game_state.bf.soldiers[i].alive {
-            game_state.bf.soldiers[i].reap_timer -= game_state.bf.frame_time as f32;
+            game_state.bf.soldiers[i].reap_timer -= game_state.bf.frame_time as f64;
             if game_state.bf.soldiers[i].reap_timer < 0.0 {
                 game_state.ai.soldier_ai.swap_remove(i);
                 game_state.bf.soldiers.swap_remove(i);
                 reaped = true;
             }
         } else {
-            game_state.bf.soldiers[i].eat_timer -= game_state.bf.frame_time as f32;
+            game_state.bf.soldiers[i].eat_timer -= game_state.bf.frame_time as f64;
             if game_state.bf.soldiers[i].eat_timer <= 0.0 {
                 game_state.bf.soldiers[i].eat_timer += EAT_TIME;
                 game_state.bf.soldiers[i].food -= 1;
@@ -484,7 +486,7 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
 fn execute_action(action: &ai::Action, bf: &mut Battlefield, prev_curr_time: f64) -> () {
     match action {
         &ai::Action::NoAction(s)           => idle_soldier(bf, s, prev_curr_time),
-        &ai::Action::MoveAction(s, diff)   => bf.soldiers[s].position += gameutil::truncate(diff, SOLDIER_SPEED * bf.frame_time as f32),
+        &ai::Action::MoveAction(s, diff)   => bf.soldiers[s].position += gameutil::truncate(diff, SOLDIER_SPEED * bf.frame_time as f64),
         &ai::Action::ShootAction(from, to) => shoot_soldier(from, to, bf),
     }
 }
@@ -493,7 +495,7 @@ fn idle_soldier(bf: &mut Battlefield, sid: usize, prev_curr_time: f64) -> () {
     let check_supply = has_tick(bf, prev_curr_time, SUPPLY_TIME);
     let ref mut soldier = bf.soldiers[sid];
     if soldier.shot_timer > 0.0 {
-        soldier.shot_timer -= bf.frame_time as f32;
+        soldier.shot_timer -= bf.frame_time as f64;
     }
 
     if check_supply {
@@ -527,7 +529,7 @@ fn shoot_soldier(from: usize, to: usize, bf: &mut Battlefield) {
         bf.soldiers[from].ammo -= 1;
         let dist = gameutil::dist(&bf.soldiers[from], &bf.soldiers[to].position);
         let threshold = if dist > 100.0 { 0.0 } else { -dist * 0.005 + 1.0 };
-        let hit_num = bf.rng.gen::<f32>();
+        let hit_num = bf.rng.gen::<f64>();
         if hit_num < threshold {
             kill_soldier(&mut bf.soldiers[to]);
         }
@@ -548,7 +550,7 @@ fn init_soldiers(gs: &mut GameState, num: i32) -> () {
         let num_soldiers = gs.bf.soldiers.iter().filter(|s| s.side == *side).count() as i32;
         for i in 0..(std::cmp::min(num, MAX_SOLDIERS_PER_SIDE - num_soldiers)) {
             let mut pos = gs.bf.base_position[if *side == Side::Red { 1 } else { 0 }];
-            pos.z += i as f32 * 10.0;
+            pos.z += i as f64 * 10.0;
             spawn_soldier(pos,
                           &mut gs.bf.soldiers,
                           &mut gs.ai.soldier_ai, *side);
@@ -556,7 +558,7 @@ fn init_soldiers(gs: &mut GameState, num: i32) -> () {
     }
 }
 
-fn spawn_soldier(pos: Vector3<f32>, soldiers: &mut Vec<Soldier>, soldier_ai: &mut Vec<ai::SoldierAI>, side: Side) -> () {
+fn spawn_soldier(pos: Vector3<f64>, soldiers: &mut Vec<Soldier>, soldier_ai: &mut Vec<ai::SoldierAI>, side: Side) -> () {
     let s = Soldier {
         position: pos,
         direction: 0.0,
@@ -607,15 +609,15 @@ fn spawn_reinforcements(mut gs: &mut GameState, prev_curr_time: f64) -> () {
 
 fn curr_day_time_str(gs: &GameState) -> String {
     let dt = curr_day_time(gs);
-    let d  = (gs.bf.curr_time as f32 / DAY_TIME) as i32 + 1;
+    let d  = (gs.bf.curr_time as f64 / DAY_TIME) as i32 + 1;
     let h  = dt * 24.0;
-    let m  = f32::fract(h) * 60.0;
-    let s  = f32::fract(m) * 60.0;
+    let m  = f64::fract(h) * 60.0;
+    let s  = f64::fract(m) * 60.0;
     format!("Day {} {:02}:{:02}:{:02}", d, h as i32, m as i32, s as i32)
 }
 
-pub fn curr_day_time(gs: &GameState) -> f32 {
-    f32::fract(gs.bf.curr_time as f32 / DAY_TIME)
+pub fn curr_day_time(gs: &GameState) -> f64 {
+    f64::fract(gs.bf.curr_time as f64 / DAY_TIME)
 }
 
 fn cam_speed(fast: bool) -> f32 {

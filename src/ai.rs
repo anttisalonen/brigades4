@@ -11,9 +11,9 @@ use game::{Soldier, Battlefield, FlagState};
 
 use gameutil;
 
-const SHOOT_DISTANCE: f32 = 100.0;
+const SHOOT_DISTANCE: f64 = 100.0;
 const REPLAN_TIME: f64       = game::TIME_MULTIPLIER as f64 * 120.0; // seconds
-const FOOD_FETCH_BUFFER: f32 = game::TIME_MULTIPLIER as f32 * 480.0; // seconds
+const FOOD_FETCH_BUFFER: f64 = game::TIME_MULTIPLIER as f64 * 480.0; // seconds
 
 // data structures
 pub struct SoldierAI {
@@ -23,7 +23,7 @@ pub struct SoldierAI {
 
 pub enum Action {
     NoAction(usize),
-    MoveAction(usize, Vector3<f32>),
+    MoveAction(usize, Vector3<f64>),
     ShootAction(usize, usize),
 }
 
@@ -78,7 +78,7 @@ fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> AiTask {
 
     let dist = gameutil::dist(s, &supply.position);
     let time_to_travel = dist / game::SOLDIER_SPEED;
-    let time_with_food = game::EAT_TIME * (s.food - 1) as f32;
+    let time_with_food = game::EAT_TIME * (s.food - 1) as f64;
     if time_with_food - FOOD_FETCH_BUFFER < time_to_travel || s.ammo < 5 {
         AiTask::Goto(AiGoto::new(supply.position))
     } else {
@@ -87,7 +87,7 @@ fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> AiTask {
 }
 
 // generic helpers
-fn flag_target_position(sold: &Soldier, bf: &Battlefield) -> Vector3<f32> {
+fn flag_target_position(sold: &Soldier, bf: &Battlefield) -> Vector3<f64> {
     let side = sold.side;
     let distances = bf.flags.iter().map(|f| gameutil::dist(sold, &f.position));
     let zm = distances.zip(bf.flags.iter());
@@ -105,7 +105,7 @@ fn flag_target_position(sold: &Soldier, bf: &Battlefield) -> Vector3<f32> {
     bf.flags[0].position
 }
 
-fn flag_lone_holder(sold: &Soldier, bf: &Battlefield, pos: &Vector3<f32>) -> bool {
+fn flag_lone_holder(sold: &Soldier, bf: &Battlefield, pos: &Vector3<f64>) -> bool {
     let mut num_guards = 3i16;
     if gameutil::dist(sold, pos) > 5.0 {
         return false;
@@ -132,12 +132,12 @@ enum AiTask {
 // goto: if enemy is within shooting range, stop to shoot.
 // else go to given point and stay there.
 struct AiGoto {
-    targetpos: Vector3<f32>,
+    targetpos: Vector3<f64>,
 }
 
 // goto task - constructor
 impl AiGoto {
-    fn new(tgt: Vector3<f32>) -> AiGoto {
+    fn new(tgt: Vector3<f64>) -> AiGoto {
         AiGoto {
             targetpos: tgt
         }
@@ -168,7 +168,7 @@ fn find_enemy(soldier: &Soldier, bf: &Battlefield) -> Option<usize> {
     None
 }
 
-fn ai_goto(targetpos: &Vector3<f32>, soldier: &Soldier) -> Action {
+fn ai_goto(targetpos: &Vector3<f64>, soldier: &Soldier) -> Action {
     let tgt_vec = gameutil::to_vec_on_map(soldier, targetpos);
     let dist_to_tgt = tgt_vec.norm();
     if dist_to_tgt >= game::SUPPLY_DISTANCE * 0.5 {

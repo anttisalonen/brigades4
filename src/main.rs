@@ -11,22 +11,21 @@ mod game;
 mod gameutil;
 
 use na::{Vector3, Norm};
-use game::{Soldier, GROUND_NUM_TILES, TILE_SIZE, GameState};
+use game::{Soldier, GameState};
 
 const WATER_MODEL_MATRIX: [[f32; 4]; 4] = {
-    const DIM: f32 = GROUND_NUM_TILES as f32 * TILE_SIZE;
     [
-        [DIM, 0.0, 0.0, 0.0],
-        [0.0, DIM, 0.0, 0.0],
-        [0.0, 0.0, DIM, 0.0],
-        [0.0, 0.0, 0.0, 1.0f32],
+        [game::DIM as f32,  0.0,              0.0,               0.0],
+        [0.0,               game::DIM as f32, 0.0,               0.0],
+        [0.0,               0.0,              game::DIM as f32,  0.0],
+        [game::HDIM as f32, 0.0,              game::HDIM as f32, 1.0f32],
     ]
 };
 
 fn view_mode_to_scale(vm: game::ViewMode) -> [f32; 3] {
     match vm {
-        game::ViewMode::Normal    => [1.0,  1.0,  1.0f32],
-        game::ViewMode::Strategic => [40.0, 40.0, 40.0f32],
+        game::ViewMode::Normal    => [1.0,   1.0,   1.0f32],
+        game::ViewMode::Strategic => [320.0, 320.0, 320.0f32],
     }
 }
 
@@ -38,14 +37,18 @@ fn view_mode_ambient_light(vm: game::ViewMode, default: f32) -> f32 {
 }
 
 
-fn icon_model_matrix(pos: &Vector3<f32>, vm: game::ViewMode) -> [[f32; 4]; 4] {
+fn icon_model_matrix(pos: &Vector3<f64>, vm: game::ViewMode) -> [[f32; 4]; 4] {
     let scale = view_mode_to_scale(vm);
-    let yp = f32::max(pos.y, 0.0) + 20.0;
+    let yp_add = match vm {
+        game::ViewMode::Normal    => 10.0,
+        game::ViewMode::Strategic => 100.0,
+    };
+    let yp = f32::max(pos.y as f32, 0.0);
     [
-        [scale[0] * 24.0, 0.0,                      0.0,             0.0],
-        [0.0,             scale[1] * 24.0,          0.0,             0.0],
-        [0.0,             0.0,                      scale[2] * 24.0, 0.0],
-        [pos.x,           f32::max(yp, 0.0) + 10.0, pos.z,           1.0f32]
+        [scale[0] * 24.0, 0.0,                        0.0,             0.0],
+        [0.0,             scale[1] * 24.0,            0.0,             0.0],
+        [0.0,             0.0,                        scale[2] * 24.0, 0.0],
+        [pos.x as f32,    f32::max(yp, 0.0) + yp_add, pos.z as f32,    1.0f32]
     ]
 }
 
@@ -62,10 +65,10 @@ fn flag_color(flag: &game::Flag) -> [f32; 3] {
 fn soldier_model_matrix(s: &Soldier, vm: game::ViewMode) -> [[f32; 4]; 4] {
     let scale = view_mode_to_scale(vm);
     [
-        [scale[0] * f32::cos(s.direction), 0.0, f32::sin(s.direction), 0.0],
+        [scale[0] * f32::cos(s.direction as f32), 0.0, f32::sin(s.direction as f32), 0.0],
         [0.0, scale[1] * 2.0, 0.0, 0.0],
-        [-f32::sin(s.direction), 0.0, scale[2] * f32::cos(s.direction), 0.0],
-        [s.position.x, s.position.y, s.position.z, 1.0f32]
+        [-f32::sin(s.direction as f32), 0.0, scale[2] * f32::cos(s.direction as f32), 0.0],
+        [s.position.x as f32, s.position.y as f32, s.position.z as f32, 1.0f32]
     ]
 }
 
@@ -280,8 +283,8 @@ fn main() {
             let aspect_ratio = height as f32 / width as f32;
 
             let fov: f32 = 3.141592 / 3.0;
-            let zfar = 16384.0;
-            let znear = 4.0;
+            let zfar = 131072.0;
+            let znear = 16.0;
 
             let f = 1.0 / (fov / 2.0).tan();
 
@@ -295,11 +298,13 @@ fn main() {
 
         // curr_day_time is between 0 and 2pi
         // day_time is between -1 and 1
-        let curr_day_time = game::curr_day_time(&game_state) * 2.0 * 3.141592;
-        let day_time = -f32::cos(curr_day_time);
+        let curr_day_time = game::curr_day_time(&game_state) as f32 * 2.0 * 3.141592;
+        let day_time = -f32::cos(curr_day_time) as f32;
         let ambient = 0.01f32;
-        let light_len = gameutil::clamp(0.0, 1.0, day_time * 2.0 + 1.0);
-        let light = Vector3::<f32>::new(f32::sin(curr_day_time), light_len, -f32::sin(curr_day_time * 0.5)).normalize();
+        let light_len = gameutil::clamp(0.0, 1.0, day_time * 4.0 + 0.5);
+        let light = Vector3::<f32>::new(f32::sin(curr_day_time),
+                                        light_len,
+                                        -f32::sin(curr_day_time * 0.5)).normalize();
         let light = gameutil::truncate(light * light_len, 1.0);
 
         let mut gfx_per_frame = GfxPerFrame {
@@ -382,7 +387,7 @@ fn view_matrix(position: &Vector3<f32>, direction: &Vector3<f32>, up: &Vector3<f
 }
 
 fn draw_icon(gfx: &Gfx, mut gfx_per_frame: &mut GfxPerFrame,
-             position: &Vector3<f32>,
+             position: &Vector3<f64>,
              vm: game::ViewMode,
              color: [f32; 3], texture: &glium::Texture2d, params: &glium::DrawParameters) -> () {
     use glium::{Surface};
