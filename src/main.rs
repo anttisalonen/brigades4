@@ -10,7 +10,7 @@ mod ai;
 mod game;
 mod gameutil;
 
-use na::{Vector3, Norm};
+use na::{Vector3, Norm, Rotation3, Matrix4};
 use game::{Soldier, GameState};
 
 const WATER_MODEL_MATRIX: [[f32; 4]; 4] = {
@@ -25,6 +25,7 @@ const WATER_MODEL_MATRIX: [[f32; 4]; 4] = {
 fn view_mode_to_scale(vm: game::ViewMode) -> [f32; 3] {
     match vm {
         game::ViewMode::Normal    => [1.0,   1.0,   1.0f32],
+        game::ViewMode::Tactical  => [10.0,  10.0,  10.0f32],
         game::ViewMode::Strategic => [320.0, 320.0, 320.0f32],
     }
 }
@@ -32,6 +33,7 @@ fn view_mode_to_scale(vm: game::ViewMode) -> [f32; 3] {
 fn view_mode_ambient_light(vm: game::ViewMode, default: f32) -> f32 {
     match vm {
         game::ViewMode::Normal    => default,
+        game::ViewMode::Tactical  => 0.8,
         game::ViewMode::Strategic => 0.8,
     }
 }
@@ -41,6 +43,7 @@ fn icon_model_matrix(pos: &Vector3<f64>, vm: game::ViewMode) -> [[f32; 4]; 4] {
     let scale = view_mode_to_scale(vm);
     let yp_add = match vm {
         game::ViewMode::Normal    => 10.0,
+        game::ViewMode::Tactical  => 40.0,
         game::ViewMode::Strategic => 100.0,
     };
     let yp = f32::max(pos.y as f32, 0.0);
@@ -68,8 +71,28 @@ fn soldier_model_matrix(s: &Soldier, vm: game::ViewMode) -> [[f32; 4]; 4] {
         [scale[0] * f32::cos(s.direction as f32), 0.0, f32::sin(s.direction as f32), 0.0],
         [0.0, scale[1] * 2.0, 0.0, 0.0],
         [-f32::sin(s.direction as f32), 0.0, scale[2] * f32::cos(s.direction as f32), 0.0],
-        [s.position.x as f32, s.position.y as f32, s.position.z as f32, 1.0f32]
+        [s.position.x as f32, s.position.y as f32 + 1.0, s.position.z as f32, 1.0f32]
     ]
+}
+
+fn truck_model_matrix(t: &game::Truck, vm: game::ViewMode) -> [[f32; 4]; 4] {
+    use na::{ToHomogeneous, Transpose};
+
+    let rot = Rotation3::new_observer_frame(&Vector3::new(t.direction.x as f32,
+                                                          t.direction.y as f32,
+                                                          t.direction.z as f32),
+                                            &Vector3::new(0.0, 1.0, 0.0));
+    let scale = view_mode_to_scale(vm);
+    let trans_matrix = Matrix4::new(1.0, 0.0, 0.0, 0.0,
+                                    0.0, 1.0, 0.0, 0.0,
+                                    0.0, 0.0, 1.0, 0.0,
+                                    t.position.x as f32, t.position.y as f32 + 1.5, t.position.z as f32, 1.0f32);
+    let scale_matrix = Matrix4::new(scale[0] * 3.0, 0.0, 0.0, 0.0,
+                                    0.0, scale[1] * 3.0, 0.0, 0.0,
+                                    0.0, 0.0, scale[2] * 8.0, 0.0,
+                                    0.0, 0.0, 0.0, 1.0f32);
+
+    *(trans_matrix.transpose() * rot.to_homogeneous() * scale_matrix).as_ref()
 }
 
 const ICON_VERTICES: [geom::TexVertex; 4] = [
@@ -339,17 +362,19 @@ fn main() {
                    &IDENTITY_MATRIX, [0.2, 0.8, 0.2f32], game::ViewMode::Normal, &params);
 
         for sold in game_state.bf.soldiers.iter() {
-            let col = if sold.alive {
-                if sold.side == game::Side::Red {
-                    [1.0, 0.0, 0.0f32]
-                } else {
-                    [0.0, 0.0, 1.0f32]
-                }
-            } else {
-                [0.0, 0.0, 0.0f32]
-            };
+            if game::soldier_boarded(&game_state.bf, sold.id) != None {
+                continue;
+            }
+            let col = get_color(sold.alive, sold.side);
             draw_model(&gfx, &mut gfx_per_frame, &positions, &normals, &indices,
                        &soldier_model_matrix(&sold, game_state.bf.view_mode), col,
+                       game_state.bf.view_mode, &params);
+        }
+
+        for truck in game_state.bf.trucks.iter() {
+            let col = get_color(truck.alive, truck.side);
+            draw_model(&gfx, &mut gfx_per_frame, &positions, &normals, &indices,
+                       &truck_model_matrix(&truck, game_state.bf.view_mode), col,
                        game_state.bf.view_mode, &params);
         }
         gfx_per_frame.target.finish().unwrap();
@@ -431,5 +456,17 @@ fn load_texture(filename: &str, display: &glium::Display) -> glium::Texture2d {
     let img_dimensions = img.dimensions();
     let img = glium::texture::RawImage2d::from_raw_rgba_reversed(img.into_raw(), img_dimensions);
     glium::texture::Texture2d::new(display, img).unwrap()
+}
+
+fn get_color(alive: bool, side: game::Side) -> [f32; 3] {
+    if alive {
+        if side == game::Side::Red {
+            [1.0, 0.0, 0.0f32]
+        } else {
+            [0.0, 0.0, 1.0f32]
+        }
+    } else {
+        [0.0, 0.0, 0.0f32]
+    }
 }
 
