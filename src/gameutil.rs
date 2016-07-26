@@ -40,3 +40,8 @@ pub fn truncate<T>(v: Vector3<T>, len: T) -> Vector3<T>
     }
 }
 
+pub fn mix(x: f64, y: f64, a: f64) -> f64 {
+    x * (1.0 - a) + y * a
+}
+
+

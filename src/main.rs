@@ -124,6 +124,7 @@ struct Gfx {
     icon_normals: glium::VertexBuffer<geom::Normal>,
     icon_indices: glium::IndexBuffer<u16>,
     program: glium::Program,
+    color_program: glium::Program,
     icon_program: glium::Program,
 }
 
@@ -184,6 +185,44 @@ fn main() {
         }
     "#;
 
+    let terrain_vertex_shader_src = r#"
+        #version 130
+
+        in vec3 position;
+        in vec3 normal;
+        in vec3 color;
+
+        out vec3 v_normal;
+        out vec3 v_color;
+
+        uniform mat4 perspective;
+        uniform mat4 view;
+        uniform mat4 model;
+
+        void main() {
+            mat4 modelview = view * model;
+            v_normal = normal;
+            v_color = color;
+            gl_Position = perspective * modelview * vec4(position, 1.0);
+        }
+    "#;
+
+    let terrain_fragment_shader_src = r#"
+        #version 130
+
+        in vec3 v_normal;
+        in vec3 v_color;
+        out vec4 color;
+        uniform vec3 u_light;
+        uniform float u_ambient;
+
+        void main() {
+            float brightness = max(dot(normalize(v_normal), u_light), u_ambient);
+            vec3 dark_color = vec3(0.0, 0.0, 0.0);
+            color = vec4(mix(dark_color, v_color, brightness), 1.0);
+        }
+    "#;
+
     let icon_vertex_shader_src = r#"
         #version 130
 
@@ -234,17 +273,22 @@ fn main() {
     let program = glium::Program::from_source(&display, vertex_shader_src, fragment_shader_src,
                                               None).unwrap();
 
+    let color_program = glium::Program::from_source(&display, terrain_vertex_shader_src, terrain_fragment_shader_src,
+                                              None).unwrap();
+
     let mut game_state = GameState::new(display);
 
     let ground_geom = game::get_ground_geometry(&game_state.bf.ground);
     let ground_positions = glium::VertexBuffer::new(&game_state.bf.display, &ground_geom.vertices).unwrap();
     let ground_normals = glium::VertexBuffer::new(&game_state.bf.display, &ground_geom.normals).unwrap();
+    let ground_colors = glium::VertexBuffer::new(&game_state.bf.display, &ground_geom.colors).unwrap();
     let ground_indices = glium::IndexBuffer::new(&game_state.bf.display, glium::index::PrimitiveType::TrianglesList,
                                           &ground_geom.indices).unwrap();
 
     let water_geom = game::get_water_geometry();
     let water_positions = glium::VertexBuffer::new(&game_state.bf.display, &water_geom.vertices).unwrap();
     let water_normals = glium::VertexBuffer::new(&game_state.bf.display, &water_geom.normals).unwrap();
+    let water_colors = glium::VertexBuffer::new(&game_state.bf.display, &water_geom.colors).unwrap();
     let water_indices = glium::IndexBuffer::new(&game_state.bf.display, glium::index::PrimitiveType::TrianglesList,
                                           &water_geom.indices).unwrap();
 
@@ -277,6 +321,7 @@ fn main() {
         icon_normals: icon_normals,
         icon_indices: icon_indices,
         program: program,
+        color_program: color_program,
         icon_program: icon_program,
     };
 
@@ -354,12 +399,12 @@ fn main() {
 
 
         // water
-        draw_model(&gfx, &mut gfx_per_frame, &water_positions, &water_normals, &water_indices,
-                   &WATER_MODEL_MATRIX, [0.0, 0.0, 0.9f32], game::ViewMode::Normal, &params);
+        draw_model_with_color(&gfx, &mut gfx_per_frame, &water_positions, &water_normals, &water_colors, &water_indices,
+                   &WATER_MODEL_MATRIX, game::ViewMode::Normal, &params);
 
         // ground
-        draw_model(&gfx, &mut gfx_per_frame, &ground_positions, &ground_normals, &ground_indices,
-                   &IDENTITY_MATRIX, [0.2, 0.8, 0.2f32], game::ViewMode::Normal, &params);
+        draw_model_with_color(&gfx, &mut gfx_per_frame, &ground_positions, &ground_normals, &ground_colors, &ground_indices,
+                   &IDENTITY_MATRIX, game::ViewMode::Normal, &params);
 
         for sold in game_state.bf.soldiers.iter() {
             if game::soldier_boarded(&game_state.bf, sold.id) != None {
@@ -426,6 +471,26 @@ fn draw_icon(gfx: &Gfx, mut gfx_per_frame: &mut GfxPerFrame,
             u_ambient: ambient,
             u_color: color,
             tex: texture,
+        },
+        &params).unwrap();
+}
+
+fn draw_model_with_color(gfx: &Gfx, mut gfx_per_frame: &mut GfxPerFrame,
+    positions: &glium::VertexBuffer<geom::Vertex>,
+    normals: &glium::VertexBuffer<geom::Normal>,
+    colors: &glium::VertexBuffer<geom::Color>,
+    indices: &glium::IndexBuffer<u16>,
+    model: &[[f32; 4]; 4],
+    vm: game::ViewMode, params: &glium::DrawParameters) -> () {
+    use glium::{Surface};
+    let ambient = view_mode_ambient_light(vm, gfx_per_frame.ambient);
+    gfx_per_frame.target.draw((positions, normals, colors), indices, &gfx.color_program,
+        &uniform! {
+            model: *model,
+            view: gfx_per_frame.view,
+            perspective: gfx_per_frame.perspective,
+            u_light: gfx_per_frame.light,
+            u_ambient: ambient
         },
         &params).unwrap();
 }

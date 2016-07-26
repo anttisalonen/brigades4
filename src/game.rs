@@ -104,6 +104,8 @@ const SOLDIER_MAX_AMMO: i32 = 40;
 
 const MAX_TRUCKS_PER_SIDE: i32 = 8;
 const TRUCK_NUM_PASSENGERS: i32 = 8;
+const MAX_TRUCK_SPEED_GRASS:  f64 = 18.0;
+const MAX_TRUCK_SPEED_FOREST: f64 = 2.0;
 
 pub trait Locatable {
     fn pos(&self) -> Vector3<f64>;
@@ -135,30 +137,37 @@ impl Locatable for Flag {
 
 pub struct Ground {
     height: [[f64; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize],
+    forest: [[f64; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize],
 }
 
 pub fn init_ground() -> Ground {
-    let mut g: Ground = Ground { height: [[0.0; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize] };
+    let mut g: Ground = Ground {
+        height: [[0.0; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize],
+        forest: [[0.0; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize],
+    };
+
     for j in 0..GROUND_NUM_TILES as usize {
         for i in 0..GROUND_NUM_TILES as usize {
             g.height[i][j] =
                 f64::sin(i as f64 * 0.10)       * 400.0 +
                 f64::cos((i + j) as f64 * 0.15) * 650.0 + 700.0;
+            g.forest[i][j] = j as f64 / GROUND_NUM_TILES as f64;
         }
     }
     g
 }
 
-pub fn get_landscape_geometry<F>(num_tiles: i32, scale: f64, height: F) -> geom::Geom
-    where F : Fn(i32, i32) -> f64 {
+pub fn get_landscape_geometry<F, G>(num_tiles: i32, scale: f64, height: F, color: G) -> geom::Geom
+    where F : Fn(i32, i32) -> f64,
+          G : Fn(f32, f32) -> (f32, f32, f32) {
     let gu = num_tiles as usize;
     let mut geo = geom::new_geom(gu * gu, (gu - 1) * (gu - 1) * 6);
     for j in 0..gu {
         for i in 0..gu {
+            let rx = (i as f64 * scale - num_tiles as f64 * scale * 0.5) as f32;
+            let rz = (j as f64 * scale - num_tiles as f64 * scale * 0.5) as f32;
             geo.vertices[j * gu + i] = geom::Vertex{position:
-                ((i as f64 * scale - num_tiles as f64 * scale * 0.5) as f32,
-                height(i as i32, j as i32) as f32,
-                (j as f64 * scale - num_tiles as f64 * scale * 0.5) as f32)
+                (rx, height(i as i32, j as i32) as f32, rz)
             };
 
             let dy_x = height(i as i32 + 1, j as i32)     - height(i as i32 - 1, j as i32);
@@ -167,7 +176,11 @@ pub fn get_landscape_geometry<F>(num_tiles: i32, scale: f64, height: F) -> geom:
             let norm_z = Vector3::new(0.0,                  dy_z as f32, (2.0 * scale) as f32);
             let norm = norm_z.cross(&norm_x);
             let norm = norm.normalize();
+
+            let col = color(rx, rz);
+
             geo.normals[j * gu + i] = geom::Normal{normal: (norm.x, norm.y, norm.z)};
+            geo.colors[j * gu + i] = geom::Color{color: (col.0, col.1, col.2)};
         }
     }
     for j in 0..gu - 1 {
@@ -184,11 +197,21 @@ pub fn get_landscape_geometry<F>(num_tiles: i32, scale: f64, height: F) -> geom:
 }
 
 pub fn get_ground_geometry(ground: &Ground) -> geom::Geom {
-    get_landscape_geometry(GROUND_NUM_TILES, TILE_SIZE, |x, y| get_height_at_i(ground, x, y))
+    get_landscape_geometry(GROUND_NUM_TILES, TILE_SIZE, |x, y| get_height_at_i(ground, x, y),
+        |x, y| get_ground_color_at(ground, x, y))
+}
+
+fn get_ground_color_at(ground: &Ground, x: f32, y: f32) -> (f32, f32, f32) {
+    let forest = get_forest_at(ground, x as f64, y as f64);
+    let r = gameutil::mix(0.2, 0.05, forest) as f32;
+    let g = gameutil::mix(0.8, 0.15, forest) as f32;
+    let b = gameutil::mix(0.2, 0.05, forest) as f32;
+    (r, g, b)
 }
 
 pub fn get_water_geometry() -> geom::Geom {
-    get_landscape_geometry(GROUND_NUM_TILES / 4, TILE_SIZE * 4.0, |_, _| 0.0)
+    get_landscape_geometry(GROUND_NUM_TILES / 4, TILE_SIZE * 4.0, |_, _| 0.0,
+                           |_, _| (0.0, 0.0, 0.9))
 }
 
 pub fn get_height_at_i(ground: &Ground, x: i32, y: i32) -> f64 {
@@ -197,21 +220,33 @@ pub fn get_height_at_i(ground: &Ground, x: i32, y: i32) -> f64 {
     return ground.height[ix][iy];
 }
 
+macro_rules! interpolate_at {
+    ( $ground:expr, $xp:expr, $yp:expr, $field:ident ) => {
+        {
+            let x = ($xp + HDIM) / TILE_SIZE;
+            let y = ($yp + HDIM) / TILE_SIZE;
+            let ix = gameutil::clamp_i(0, GROUND_NUM_TILES - 2, x as i32) as usize;
+            let iy = gameutil::clamp_i(0, GROUND_NUM_TILES - 2, y as i32) as usize;
+            let fx = f64::fract(x);
+            let fy = f64::fract(y);
+            let h1 = $ground.$field[ix + 0][iy + 0];
+            let h2 = $ground.$field[ix + 1][iy + 0];
+            let h3 = $ground.$field[ix + 0][iy + 1];
+            let h4 = $ground.$field[ix + 1][iy + 1];
+            let ha = h1 + (h2 - h1) * fx;
+            let hb = h3 + (h4 - h3) * fx;
+            let hc = ha + (hb - ha) * fy;
+            return hc;
+        }
+    };
+}
+
 pub fn get_height_at(ground: &Ground, x: f64, y: f64) -> f64 {
-    let x = (x + HDIM) / TILE_SIZE;
-    let y = (y + HDIM) / TILE_SIZE;
-    let ix = gameutil::clamp_i(0, GROUND_NUM_TILES - 2, x as i32) as usize;
-    let iy = gameutil::clamp_i(0, GROUND_NUM_TILES - 2, y as i32) as usize;
-    let fx = f64::fract(x);
-    let fy = f64::fract(y);
-    let h1 = ground.height[ix + 0][iy + 0];
-    let h2 = ground.height[ix + 1][iy + 0];
-    let h3 = ground.height[ix + 0][iy + 1];
-    let h4 = ground.height[ix + 1][iy + 1];
-    let ha = h1 + (h2 - h1) * fx;
-    let hb = h3 + (h4 - h3) * fx;
-    let hc = ha + (hb - ha) * fy;
-    return hc;
+    interpolate_at!(ground, x, y, height)
+}
+
+pub fn get_forest_at(ground: &Ground, x: f64, y: f64) -> f64 {
+    interpolate_at!(ground, x, y, forest)
 }
 
 struct AiState {
@@ -696,7 +731,9 @@ fn drive_truck(bf: &mut Battlefield, sid: SoldierID, steering: f64, gas: f64) ->
         &truck.direction);
     truck.speed += gameutil::clamp(0.0,  1.0, gas) * 2.0  * bf.frame_time;
     truck.speed += gameutil::clamp(-1.0, 0.0, gas) * 10.0 * bf.frame_time;
-    truck.speed = gameutil::clamp(0.0, 18.0, truck.speed);
+    let forest = get_forest_at(&bf.ground, truck.position.x, truck.position.z);
+    let max_speed = gameutil::mix(MAX_TRUCK_SPEED_GRASS, MAX_TRUCK_SPEED_FOREST, forest);
+    truck.speed = gameutil::clamp(0.0, max_speed, truck.speed);
     truck.position += truck.direction * truck.speed * bf.frame_time;
 }
 
