@@ -1,11 +1,14 @@
 extern crate glium;
 extern crate rand;
 extern crate nalgebra as na;
+extern crate noise;
 
 use std;
 use std::collections::HashMap;
 
 use na::{Vector3, Norm, Rotation3, Cross};
+
+use noise::{Brownian2, Seed};
 
 use ai;
 use geom;
@@ -140,7 +143,37 @@ pub struct Ground {
     forest: [[f64; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize],
 }
 
-pub fn init_ground() -> Ground {
+fn init_ground() -> Ground {
+    let seed = Seed::new(12);
+    let seed2 = Seed::new(13);
+    let ground_octaves = 8;
+    let ground_wavelength = 1.0;
+    let ground_persistence = 0.5;
+    let forest_octaves = 8;
+    let forest_wavelength = 0.2;
+    let forest_persistence = 0.3;
+    let ground_noise = Brownian2::new(noise::perlin2, ground_octaves).wavelength(ground_wavelength).persistence(ground_persistence);
+    let forest_noise = Brownian2::new(noise::perlin2, forest_octaves).wavelength(forest_wavelength).persistence(forest_persistence);
+    let frequency_x = 1.0 / 64.0;
+    let frequency_y = 1.0 / 64.0;
+    let loc_x = 12.0;
+    let loc_y = 10.0;
+    let ground_bias = 0.2;
+    let forest_bias = 0.3;
+    let ground_scale = 4000.0;
+    let forest_scale = 4.0;
+
+    build_ground(|x, y| (ground_noise.apply(&seed,
+                                           &[loc_x + x * frequency_x,
+                                             loc_y + y * frequency_y]) + ground_bias) * ground_scale,
+                 |x, y| (forest_noise.apply(&seed2,
+                                           &[loc_x + x * frequency_x,
+                                             loc_y + y * frequency_y]) + forest_bias) * forest_scale)
+}
+
+fn build_ground<F, G>(height: F, forest: G) -> Ground
+    where F: Fn(f64, f64) -> f64,
+          G: Fn(f64, f64) -> f64 {
     let mut g: Ground = Ground {
         height: [[0.0; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize],
         forest: [[0.0; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize],
@@ -148,10 +181,8 @@ pub fn init_ground() -> Ground {
 
     for j in 0..GROUND_NUM_TILES as usize {
         for i in 0..GROUND_NUM_TILES as usize {
-            g.height[i][j] =
-                f64::sin(i as f64 * 0.10)       * 400.0 +
-                f64::cos((i + j) as f64 * 0.15) * 650.0 + 700.0;
-            g.forest[i][j] = j as f64 / GROUND_NUM_TILES as f64;
+            g.height[i][j] = gameutil::clamp(-500.0, 4000.0, height(i as f64, j as f64));
+            g.forest[i][j] = gameutil::clamp(0.0, 1.0, forest(i as f64, j as f64));
         }
     }
     g

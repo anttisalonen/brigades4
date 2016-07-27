@@ -3,6 +3,7 @@ extern crate glium;
 extern crate nalgebra as na;
 extern crate time;
 extern crate image;
+extern crate noise;
 
 mod geom;
 mod cube;
