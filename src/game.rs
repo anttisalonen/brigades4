@@ -2,6 +2,7 @@ extern crate glium;
 extern crate rand;
 extern crate nalgebra as na;
 extern crate noise;
+extern crate rustc_serialize;
 
 use std;
 use std::collections::HashMap;
@@ -143,32 +144,19 @@ pub struct Ground {
     forest: [[f64; GROUND_NUM_TILES as usize]; GROUND_NUM_TILES as usize],
 }
 
-fn init_ground() -> Ground {
-    let seed = Seed::new(12);
-    let seed2 = Seed::new(13);
-    let ground_octaves = 8;
-    let ground_wavelength = 1.0;
-    let ground_persistence = 0.7;
-    let forest_octaves = 8;
-    let forest_wavelength = 0.2;
-    let forest_persistence = 0.3;
-    let ground_noise = Brownian2::new(noise::perlin2, ground_octaves).wavelength(ground_wavelength).persistence(ground_persistence);
-    let forest_noise = Brownian2::new(noise::perlin2, forest_octaves).wavelength(forest_wavelength).persistence(forest_persistence);
-    let frequency_x = 1.0 / 64.0;
-    let frequency_y = 1.0 / 64.0;
-    let loc_x = 12.0;
-    let loc_y = 10.0;
-    let ground_bias = 0.2;
-    let forest_bias = 0.3;
-    let ground_scale = 4000.0;
-    let forest_scale = 4.0;
+fn init_ground(param: &GroundParams) -> Ground {
+    let ground_seed = Seed::new(param.ground.seed as u32);
+    let forest_seed = Seed::new(param.forest.seed as u32);
 
-    build_ground(|x, y| (ground_noise.apply(&seed,
-                                           &[loc_x + x * frequency_x,
-                                             loc_y + y * frequency_y]) + ground_bias) * ground_scale,
-                 |x, y| (forest_noise.apply(&seed2,
-                                           &[loc_x + x * frequency_x,
-                                             loc_y + y * frequency_y]) + forest_bias) * forest_scale)
+    let ground_noise = Brownian2::new(noise::perlin2, param.ground.octaves as usize).wavelength(param.ground.wavelength).persistence(param.ground.persistence);
+    let forest_noise = Brownian2::new(noise::perlin2, param.forest.octaves as usize).wavelength(param.forest.wavelength).persistence(param.forest.persistence);
+
+    build_ground(|x, y| (ground_noise.apply(&ground_seed,
+                                           &[param.loc_x + x / param.frequency_x,
+                                             param.loc_y + y / param.frequency_y]) + param.ground.bias) * param.ground.scale,
+                 |x, y| (forest_noise.apply(&forest_seed,
+                                           &[param.loc_x + x / param.frequency_x,
+                                             param.loc_y + y / param.frequency_y]) + param.forest.bias) * param.forest.scale)
 }
 
 fn build_ground<F, G>(height: F, forest: G) -> Ground
@@ -360,11 +348,37 @@ pub struct GameState {
     ai: AiState,
 }
 
+#[derive(RustcDecodable, RustcEncodable)]
+pub struct GroundItemParams {
+    seed: u64,
+    octaves: u64,
+    wavelength: f64,
+    persistence: f64,
+    bias: f64,
+    scale: f64,
+}
+
+#[derive(RustcDecodable, RustcEncodable)]
+pub struct GroundParams {
+    ground: GroundItemParams,
+    forest: GroundItemParams,
+    frequency_x: f64,
+    frequency_y: f64,
+    loc_x: f64,
+    loc_y: f64,
+}
+
+#[derive(RustcDecodable, RustcEncodable)]
+pub struct GameParams {
+    seed: u64,
+    ground_params: GroundParams,
+}
+
 impl GameState {
-    pub fn new(d: glium::Display) -> GameState {
-        let seed = std::env::args().last().unwrap_or(String::from("")).parse::<usize>().unwrap_or(21);
-        let mut rng = rand::StdRng::from_seed(&[seed]);
-        let ground = init_ground();
+    pub fn new(d: glium::Display, game_params: &GameParams) -> GameState {
+        let seed = game_params.seed;
+        let mut rng = rand::StdRng::from_seed(&[seed as usize]);
+        let ground = init_ground(&game_params.ground_params);
 
         let mut flag_positions = Vec::new();
         loop {

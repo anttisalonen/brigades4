@@ -1,15 +1,22 @@
 #[macro_use]
+
 extern crate glium;
 extern crate nalgebra as na;
 extern crate time;
 extern crate image;
 extern crate noise;
+extern crate rustc_serialize;
 
 mod geom;
 mod cube;
 mod ai;
 mod game;
 mod gameutil;
+
+use std::fs::File;
+use std::io::Read;
+
+use rustc_serialize::json;
 
 use na::{Vector3, Norm, Rotation3, Matrix4};
 use game::{Soldier, GameState};
@@ -139,6 +146,8 @@ struct GfxPerFrame {
 
 fn main() {
     use glium::{DisplayBuild, Surface};
+    let game_params = read_game_params("share/game_params.json");
+
     let display = glium::glutin::WindowBuilder::new()
                         .with_depth_buffer(24)
                         .build_glium().unwrap();
@@ -277,7 +286,7 @@ fn main() {
     let color_program = glium::Program::from_source(&display, terrain_vertex_shader_src, terrain_fragment_shader_src,
                                               None).unwrap();
 
-    let mut game_state = GameState::new(display);
+    let mut game_state = GameState::new(display, &game_params);
 
     let ground_geom = game::get_ground_geometry(&game_state.bf.ground);
     let ground_positions = glium::VertexBuffer::new(&game_state.bf.display, &ground_geom.vertices).unwrap();
@@ -536,3 +545,9 @@ fn get_color(alive: bool, side: game::Side) -> [f32; 3] {
     }
 }
 
+fn read_game_params(path: &str) -> game::GameParams {
+    let mut data = String::new();
+    let mut f = File::open(path).unwrap();
+    f.read_to_string(&mut data).unwrap();
+    json::decode(&data).unwrap()
+}
