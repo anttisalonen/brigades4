@@ -6,7 +6,7 @@ extern crate noise;
 use std;
 use std::collections::HashMap;
 
-use na::{Vector3, Norm, Rotation3, Cross};
+use na::{Vector3, Norm, Rotation3, Cross, Matrix2, Determinant};
 
 use noise::{Brownian2, Seed};
 
@@ -148,7 +148,7 @@ fn init_ground() -> Ground {
     let seed2 = Seed::new(13);
     let ground_octaves = 8;
     let ground_wavelength = 1.0;
-    let ground_persistence = 0.5;
+    let ground_persistence = 0.7;
     let forest_octaves = 8;
     let forest_wavelength = 0.2;
     let forest_persistence = 0.3;
@@ -264,10 +264,21 @@ macro_rules! interpolate_at {
             let h2 = $ground.$field[ix + 1][iy + 0];
             let h3 = $ground.$field[ix + 0][iy + 1];
             let h4 = $ground.$field[ix + 1][iy + 1];
-            let ha = h1 + (h2 - h1) * fx;
-            let hb = h3 + (h4 - h3) * fx;
-            let hc = ha + (hb - ha) * fy;
-            return hc;
+            // barycentric coordinates
+            let ((x1, y1), (x2, y2), (x3, y3), (nh1, nh2, nh3)) = {
+                if fy < 1.0 - fx {
+                    ((0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (h1, h3, h2))
+                } else {
+                    ((1.0, 0.0), (0.0, 1.0), (1.0, 1.0), (h2, h3, h4))
+                }
+            };
+            let t = Matrix2::new(x1 - x3, x2 - x3,
+                                 y1 - y3, y2 - y3);
+            let det = t.determinant();
+            let lam1 = ((y2 - y3) * (fx - x3) + (x3 - x2) * (fy - y3)) / det;
+            let lam2 = ((y3 - y1) * (fx - x3) + (x1 - x3) * (fy - y3)) / det;
+            let lam3 = 1.0 - lam1 - lam2;
+            lam1 * nh1 + lam2 * nh2 + lam3 * nh3
         }
     };
 }
