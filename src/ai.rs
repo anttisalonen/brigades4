@@ -6,9 +6,10 @@ use self::core::iter::FromIterator;
 
 use na::{Vector3, Norm, Dot, Cross};
 
-use game::*;
+use bf_info::*;
 
 use gameutil;
+use prim;
 
 const SHOOT_DISTANCE: f64 = 100.0;
 const REPLAN_TIME: f64       = TIME_MULTIPLIER as f64 * 120.0; // seconds
@@ -173,11 +174,11 @@ fn flag_target_position(sold: &Soldier, bf: &Battlefield) -> Vector3<f64> {
     let zm = sort_by_distance!(sold, &bf.flags);
     for (_, flag) in zm {
         match flag.flag_state {
-            FlagState::Free                       => return flag.position,
-            FlagState::Transition(s) if s == side => (),
-            FlagState::Transition(_)              => return flag.position,
-            FlagState::Owned(s) if s == side      => if flag_lone_holder(sold, bf, &flag.position) { return flag.position; } else { () },
-            FlagState::Owned(_)                   => return flag.position,
+            prim::FlagState::Free                       => return flag.position,
+            prim::FlagState::Transition(s) if s == side => (),
+            prim::FlagState::Transition(_)              => return flag.position,
+            prim::FlagState::Owned(s) if s == side      => if flag_lone_holder(sold, bf, &flag.position) { return flag.position; } else { () },
+            prim::FlagState::Owned(_)                   => return flag.position,
         }
     }
     bf.flags[0].position

@@ -1,7 +1,7 @@
 use std;
 
 use na::{Vector3, Norm, BaseFloat};
-use game::{Soldier};
+use bf_info::{Soldier};
 
 pub fn to_vec_on_map(s1: &Soldier, tgt: &Vector3<f64>) -> Vector3<f64> {
     let diff_vec = *tgt - s1.position;

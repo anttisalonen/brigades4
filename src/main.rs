@@ -12,6 +12,10 @@ mod cube;
 mod ai;
 mod game;
 mod gameutil;
+mod prim;
+mod bf_info;
+mod terrain;
+mod actions;
 
 use std::fs::File;
 use std::io::Read;
@@ -19,40 +23,41 @@ use std::io::Read;
 use rustc_serialize::json;
 
 use na::{Vector3, Norm, Rotation3, Matrix4};
-use game::{Soldier, GameState};
+use game::{GameState};
+use bf_info::Soldier;
 
 const WATER_MODEL_MATRIX: [[f32; 4]; 4] = {
     [
-        [game::DIM as f32,  0.0,              0.0,               0.0],
-        [0.0,               game::DIM as f32, 0.0,               0.0],
-        [0.0,               0.0,              game::DIM as f32,  0.0],
-        [game::HDIM as f32, 0.0,              game::HDIM as f32, 1.0f32],
+        [prim::DIM as f32,  0.0,              0.0,               0.0],
+        [0.0,               prim::DIM as f32, 0.0,               0.0],
+        [0.0,               0.0,              prim::DIM as f32,  0.0],
+        [prim::HDIM as f32, 0.0,              prim::HDIM as f32, 1.0f32],
     ]
 };
 
-fn view_mode_to_scale(vm: game::ViewMode) -> [f32; 3] {
+fn view_mode_to_scale(vm: prim::ViewMode) -> [f32; 3] {
     match vm {
-        game::ViewMode::Normal    => [1.0,   1.0,   1.0f32],
-        game::ViewMode::Tactical  => [10.0,  10.0,  10.0f32],
-        game::ViewMode::Strategic => [320.0, 320.0, 320.0f32],
+        prim::ViewMode::Normal    => [1.0,   1.0,   1.0f32],
+        prim::ViewMode::Tactical  => [10.0,  10.0,  10.0f32],
+        prim::ViewMode::Strategic => [320.0, 320.0, 320.0f32],
     }
 }
 
-fn view_mode_ambient_light(vm: game::ViewMode, default: f32) -> f32 {
+fn view_mode_ambient_light(vm: prim::ViewMode, default: f32) -> f32 {
     match vm {
-        game::ViewMode::Normal    => default,
-        game::ViewMode::Tactical  => 0.8,
-        game::ViewMode::Strategic => 0.8,
+        prim::ViewMode::Normal    => default,
+        prim::ViewMode::Tactical  => 0.8,
+        prim::ViewMode::Strategic => 0.8,
     }
 }
 
 
-fn icon_model_matrix(pos: &Vector3<f64>, vm: game::ViewMode) -> [[f32; 4]; 4] {
+fn icon_model_matrix(pos: &Vector3<f64>, vm: prim::ViewMode) -> [[f32; 4]; 4] {
     let scale = view_mode_to_scale(vm);
     let yp_add = match vm {
-        game::ViewMode::Normal    => 10.0,
-        game::ViewMode::Tactical  => 40.0,
-        game::ViewMode::Strategic => 100.0,
+        prim::ViewMode::Normal    => 10.0,
+        prim::ViewMode::Tactical  => 40.0,
+        prim::ViewMode::Strategic => 100.0,
     };
     let yp = f32::max(pos.y as f32, 0.0);
     [
@@ -63,17 +68,17 @@ fn icon_model_matrix(pos: &Vector3<f64>, vm: game::ViewMode) -> [[f32; 4]; 4] {
     ]
 }
 
-fn flag_color(flag: &game::Flag) -> [f32; 3] {
+fn flag_color(flag: &prim::Flag) -> [f32; 3] {
     match flag.flag_state {
-        game::FlagState::Free                         => [0.8, 0.8, 0.8],
-        game::FlagState::Transition(game::Side::Blue) => [0.2, 0.2, 0.6],
-        game::FlagState::Transition(game::Side::Red)  => [0.6, 0.2, 0.2],
-        game::FlagState::Owned(game::Side::Blue)      => [0.0, 0.0, 1.0],
-        game::FlagState::Owned(game::Side::Red)       => [1.0, 0.0, 0.0],
+        prim::FlagState::Free                         => [0.8, 0.8, 0.8],
+        prim::FlagState::Transition(prim::Side::Blue) => [0.2, 0.2, 0.6],
+        prim::FlagState::Transition(prim::Side::Red)  => [0.6, 0.2, 0.2],
+        prim::FlagState::Owned(prim::Side::Blue)      => [0.0, 0.0, 1.0],
+        prim::FlagState::Owned(prim::Side::Red)       => [1.0, 0.0, 0.0],
     }
 }
 
-fn soldier_model_matrix(s: &Soldier, vm: game::ViewMode) -> [[f32; 4]; 4] {
+fn soldier_model_matrix(s: &Soldier, vm: prim::ViewMode) -> [[f32; 4]; 4] {
     let scale = view_mode_to_scale(vm);
     [
         [scale[0] * f32::cos(s.direction as f32), 0.0, f32::sin(s.direction as f32), 0.0],
@@ -83,7 +88,7 @@ fn soldier_model_matrix(s: &Soldier, vm: game::ViewMode) -> [[f32; 4]; 4] {
     ]
 }
 
-fn truck_model_matrix(t: &game::Truck, vm: game::ViewMode) -> [[f32; 4]; 4] {
+fn truck_model_matrix(t: &bf_info::Truck, vm: prim::ViewMode) -> [[f32; 4]; 4] {
     use na::{ToHomogeneous, Transpose};
 
     let rot = Rotation3::new_observer_frame(&Vector3::new(t.direction.x as f32,
@@ -288,23 +293,23 @@ fn main() {
 
     let mut game_state = GameState::new(display, &game_params);
 
-    let ground_geom = game::get_ground_geometry(&game_state.bf.ground);
-    let ground_positions = glium::VertexBuffer::new(&game_state.bf.display, &ground_geom.vertices).unwrap();
-    let ground_normals = glium::VertexBuffer::new(&game_state.bf.display, &ground_geom.normals).unwrap();
-    let ground_colors = glium::VertexBuffer::new(&game_state.bf.display, &ground_geom.colors).unwrap();
-    let ground_indices = glium::IndexBuffer::new(&game_state.bf.display, glium::index::PrimitiveType::TrianglesList,
+    let ground_geom = terrain::get_ground_geometry(&game_state.bf.ground);
+    let ground_positions = glium::VertexBuffer::new(&game_state.display, &ground_geom.vertices).unwrap();
+    let ground_normals = glium::VertexBuffer::new(&game_state.display, &ground_geom.normals).unwrap();
+    let ground_colors = glium::VertexBuffer::new(&game_state.display, &ground_geom.colors).unwrap();
+    let ground_indices = glium::IndexBuffer::new(&game_state.display, glium::index::PrimitiveType::TrianglesList,
                                           &ground_geom.indices).unwrap();
 
-    let water_geom = game::get_water_geometry();
-    let water_positions = glium::VertexBuffer::new(&game_state.bf.display, &water_geom.vertices).unwrap();
-    let water_normals = glium::VertexBuffer::new(&game_state.bf.display, &water_geom.normals).unwrap();
-    let water_colors = glium::VertexBuffer::new(&game_state.bf.display, &water_geom.colors).unwrap();
-    let water_indices = glium::IndexBuffer::new(&game_state.bf.display, glium::index::PrimitiveType::TrianglesList,
+    let water_geom = terrain::get_water_geometry();
+    let water_positions = glium::VertexBuffer::new(&game_state.display, &water_geom.vertices).unwrap();
+    let water_normals = glium::VertexBuffer::new(&game_state.display, &water_geom.normals).unwrap();
+    let water_colors = glium::VertexBuffer::new(&game_state.display, &water_geom.colors).unwrap();
+    let water_indices = glium::IndexBuffer::new(&game_state.display, glium::index::PrimitiveType::TrianglesList,
                                           &water_geom.indices).unwrap();
 
-    let icon_positions = glium::VertexBuffer::new(&game_state.bf.display, &ICON_VERTICES).unwrap();
-    let icon_normals = glium::VertexBuffer::new(&game_state.bf.display, &ICON_NORMALS).unwrap();
-    let icon_indices = glium::IndexBuffer::new(&game_state.bf.display, glium::index::PrimitiveType::TrianglesList,
+    let icon_positions = glium::VertexBuffer::new(&game_state.display, &ICON_VERTICES).unwrap();
+    let icon_normals = glium::VertexBuffer::new(&game_state.display, &ICON_NORMALS).unwrap();
+    let icon_indices = glium::IndexBuffer::new(&game_state.display, glium::index::PrimitiveType::TrianglesList,
                                           &ICON_INDICES).unwrap();
 
     let params = glium::DrawParameters {
@@ -346,11 +351,11 @@ fn main() {
         }
 
         if let Some(winner) = game::won(&game_state) {
-            println!("Winner: {} team", if winner == game::Side::Blue { "Blue" } else { "Red" });
+            println!("Winner: {} team", if winner == prim::Side::Blue { "Blue" } else { "Red" });
             break;
         }
 
-        let mut target = game_state.bf.display.draw();
+        let mut target = game_state.display.draw();
         target.clear_color_and_depth((0.5, 0.5, 1.0, 1.0), 1.0);
         let view = view_matrix(&game_state.bf.camera.position,
                                &game_state.bf.camera.direction,
@@ -410,14 +415,14 @@ fn main() {
 
         // water
         draw_model_with_color(&gfx, &mut gfx_per_frame, &water_positions, &water_normals, &water_colors, &water_indices,
-                   &WATER_MODEL_MATRIX, game::ViewMode::Normal, &params);
+                   &WATER_MODEL_MATRIX, prim::ViewMode::Normal, &params);
 
         // ground
         draw_model_with_color(&gfx, &mut gfx_per_frame, &ground_positions, &ground_normals, &ground_colors, &ground_indices,
-                   &IDENTITY_MATRIX, game::ViewMode::Normal, &params);
+                   &IDENTITY_MATRIX, prim::ViewMode::Normal, &params);
 
         for sold in game_state.bf.soldiers.iter() {
-            if game::soldier_boarded(&game_state.bf, sold.id) != None {
+            if bf_info::soldier_boarded(&game_state.bf, sold.id) != None {
                 continue;
             }
             let col = get_color(sold.alive, sold.side);
@@ -468,7 +473,7 @@ fn view_matrix(position: &Vector3<f32>, direction: &Vector3<f32>, up: &Vector3<f
 
 fn draw_icon(gfx: &Gfx, mut gfx_per_frame: &mut GfxPerFrame,
              position: &Vector3<f64>,
-             vm: game::ViewMode,
+             vm: prim::ViewMode,
              color: [f32; 3], texture: &glium::Texture2d, params: &glium::DrawParameters) -> () {
     use glium::{Surface};
     let ambient = view_mode_ambient_light(vm, gfx_per_frame.ambient);
@@ -491,7 +496,7 @@ fn draw_model_with_color(gfx: &Gfx, mut gfx_per_frame: &mut GfxPerFrame,
     colors: &glium::VertexBuffer<geom::Color>,
     indices: &glium::IndexBuffer<u16>,
     model: &[[f32; 4]; 4],
-    vm: game::ViewMode, params: &glium::DrawParameters) -> () {
+    vm: prim::ViewMode, params: &glium::DrawParameters) -> () {
     use glium::{Surface};
     let ambient = view_mode_ambient_light(vm, gfx_per_frame.ambient);
     gfx_per_frame.target.draw((positions, normals, colors), indices, &gfx.color_program,
@@ -510,7 +515,7 @@ fn draw_model(gfx: &Gfx, mut gfx_per_frame: &mut GfxPerFrame,
     normals: &glium::VertexBuffer<geom::Normal>,
     indices: &glium::IndexBuffer<u16>,
     model: &[[f32; 4]; 4],
-    color: [f32; 3], vm: game::ViewMode, params: &glium::DrawParameters) -> () {
+    color: [f32; 3], vm: prim::ViewMode, params: &glium::DrawParameters) -> () {
     use glium::{Surface};
     let ambient = view_mode_ambient_light(vm, gfx_per_frame.ambient);
     gfx_per_frame.target.draw((positions, normals), indices, &gfx.program,
@@ -533,9 +538,9 @@ fn load_texture(filename: &str, display: &glium::Display) -> glium::Texture2d {
     glium::texture::Texture2d::new(display, img).unwrap()
 }
 
-fn get_color(alive: bool, side: game::Side) -> [f32; 3] {
+fn get_color(alive: bool, side: prim::Side) -> [f32; 3] {
     if alive {
-        if side == game::Side::Red {
+        if side == prim::Side::Red {
             [1.0, 0.0, 0.0f32]
         } else {
             [0.0, 0.0, 1.0f32]
