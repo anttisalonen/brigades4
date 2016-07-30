@@ -9,6 +9,7 @@ use self::rand::{SeedableRng,Rng};
 
 use prim;
 use terrain;
+use navmap;
 
 pub const TIME_MULTIPLIER: i32 = 60;
 pub const EAT_TIME: f64        = TIME_MULTIPLIER as f64 * 479.0;
@@ -134,33 +135,9 @@ impl Battlefield {
     pub fn new(seed: usize, ground_params: &terrain::GroundParams) -> Battlefield {
         let ground = terrain::init_ground(&ground_params);
         let mut rng = rand::StdRng::from_seed(&[seed]);
-        let mut flag_positions = Vec::new();
-        loop {
-            let xp = (rng.gen::<f64>() * 0.8 + 0.1) * prim::DIM - prim::HDIM;
-            let zp = (rng.gen::<f64>() * 0.8 + 0.1) * prim::DIM - prim::HDIM;
-            let yp = terrain::get_height_at(&ground, xp, zp);
-            if yp > 1.0 {
-                flag_positions.push(Vector3::new(xp, yp, zp));
-            }
-            if flag_positions.len() == 10 {
-                break;
-            }
-        }
-        let flags = flag_positions.into_iter().map(|p| prim::Flag {
-            position: p,
-            flag_state: prim::FlagState::Free,
-            flag_timer: prim::FLAG_TIMER,
-        }).collect();
 
-        let bx0 = -prim::HDIM + 20.0;
-        let bx1 =  prim::HDIM - 20.0;
-        let bz  = 0.0;
-        let by0 = terrain::get_height_at(&ground, bx0, bz);
-        let by1 = terrain::get_height_at(&ground, bx1, bz);
-        let base_positions = [
-            Vector3::new(bx0, by0, bz),
-            Vector3::new(bx1, by1, bz),
-        ];
+        let base_positions = navmap::find_base_positions(&ground, &mut rng);
+        let flags = navmap::find_flag_positions(&ground, &mut rng);
 
         Battlefield {
             camera: Camera {

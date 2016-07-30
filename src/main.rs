@@ -16,6 +16,7 @@ mod prim;
 mod bf_info;
 mod terrain;
 mod actions;
+mod navmap;
 
 use std::fs::File;
 use std::io::Read;

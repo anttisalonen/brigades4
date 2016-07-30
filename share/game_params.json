@@ -2,11 +2,11 @@
 	"seed": 24,
 	"ground_params": {
 		"ground": {
-			"seed": 12,
+			"seed": 14,
 			"octaves": 8,
 			"wavelength": 1.0,
 			"persistence": 0.7,
-			"bias": -0.2,
+			"bias": 0.00,
 			"scale": 4000.0
 		},
 		"forest": {

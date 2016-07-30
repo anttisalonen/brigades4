@@ -10,6 +10,8 @@ use bf_info::*;
 
 use gameutil;
 use prim;
+use navmap;
+use terrain;
 
 const SHOOT_DISTANCE: f64 = 100.0;
 const REPLAN_TIME: f64       = TIME_MULTIPLIER as f64 * 120.0; // seconds
@@ -53,6 +55,7 @@ impl Task for AiTask {
             &mut AiTask::Goto(ref mut g)  => g.update(soldier, bf),
             &mut AiTask::Board(ref mut g) => g.update(soldier, bf),
             &mut AiTask::Drive(ref mut g) => g.update(soldier, bf),
+            &mut AiTask::Sleep(ref mut g) => g.update(soldier, bf),
         }
     }
 }
@@ -73,7 +76,7 @@ pub fn soldier_ai_update(sai: &mut SoldierAI, soldier: &Soldier, bf: &Battlefiel
         sai.tasks = vec![];
     }
     if sai.tasks.len() == 0 {
-        sai.tasks.push(ai_arbitrate_task(soldier, bf));
+        sai.tasks.append(&mut ai_arbitrate_task(soldier, bf));
     }
     let num_tasks = sai.tasks.len();
     if num_tasks > 0 {
@@ -119,7 +122,7 @@ fn get_status(bf: &Battlefield, s: &Soldier) -> Status {
     }
 }
 
-fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> AiTask {
+fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> Vec<AiTask> {
     let st = get_status(bf, s);
     let supply = find_nearest_supply(bf, s, st);
 
@@ -127,8 +130,8 @@ fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> AiTask {
 
     if supply != None && (time_with_food < FOOD_FETCH_BUFFER || s.ammo < 5) {
         match st {
-            Status::Driving(_) => AiTask::Drive(AiDrive::new(supply.unwrap())),
-            _                  => AiTask::Goto(AiGoto::new(supply.unwrap())),
+            Status::Driving(_) => find_drive_path(&bf.ground, s.position, supply.unwrap()),
+            _                  => vec![AiTask::Goto(AiGoto::new(supply.unwrap()))],
         }
     } else {
         match st {
@@ -136,20 +139,38 @@ fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> AiTask {
                 let ref truck = bf.trucks[tid.id];
                 if have_enough_passengers(bf, truck) {
                     // taxi
-                    AiTask::Drive(AiDrive::new(flag_target_position(s, bf)))
+                    find_drive_path(&bf.ground, s.position, flag_target_position(s, bf))
                 } else {
                     // back home
-                    AiTask::Drive(AiDrive::new(get_base_position(bf, s.side)))
+                    let bp = get_base_position(bf, s.side);
+                    let dist = gameutil::dist(s, &bp);
+                    if dist < 50.0 {
+                        vec![AiTask::Sleep(AiSleep::new(15.0 * 60.0))]
+                    } else {
+                        find_drive_path(&bf.ground, s.position, bp)
+                    }
                 }
             },
-            Status::Boarded(_) => AiTask::Goto(AiGoto::new(flag_target_position(s, bf))),
+            Status::Boarded(_) => vec![AiTask::Goto(AiGoto::new(flag_target_position(s, bf)))],
             Status::OnFoot     => {
                 if let Some(truck) = free_truck_nearby(s, bf) {
-                    AiTask::Board(AiBoard::new(truck.0))
+                    vec![AiTask::Board(AiBoard::new(truck.0))]
                 } else {
-                    AiTask::Goto(AiGoto::new(flag_target_position(s, bf)))
+                    vec![AiTask::Goto(AiGoto::new(flag_target_position(s, bf)))]
                 }
             }
+        }
+    }
+}
+
+fn find_drive_path(ground: &terrain::Ground, mypos: Vector3<f64>, targetpos: Vector3<f64>) -> Vec<AiTask> {
+    let mpath = navmap::find_path(ground, mypos, targetpos);
+    match mpath {
+        None       => vec![AiTask::Sleep(AiSleep::new(15.0 * 60.0))],
+        Some(path) => {
+            path.iter().rev().map(|node| {
+                AiTask::Drive(AiDrive::new(Vector3::new(node.x as f64, 0.0, node.y as f64)))
+            }).collect()
         }
     }
 }
@@ -208,6 +229,7 @@ enum AiTask {
     Goto(AiGoto),
     Board(AiBoard),
     Drive(AiDrive),
+    Sleep(AiSleep),
 }
 
 // goto: if enemy is within shooting range, stop to shoot.
@@ -378,4 +400,31 @@ impl Task for AiDrive {
 fn have_enough_passengers(bf: &Battlefield, truck: &Truck) -> bool {
     return num_passengers(bf, truck) > 3;
 }
+
+// sleep: do nothing for a while.
+struct AiSleep {
+    time: f64, // seconds
+}
+
+// sleep task - constructor
+impl AiSleep {
+    fn new(time: f64) -> AiSleep {
+        AiSleep {
+            time: time
+        }
+    }
+}
+
+// sleep task - update function
+impl Task for AiSleep {
+    fn update(&mut self, soldier: &Soldier, bf: &Battlefield) -> Option<Action> {
+        self.time -= bf.frame_time;
+        if self.time < 0.0 {
+            None
+        } else {
+            Some(Action::NoAction(soldier.id))
+        }
+    }
+}
+
 
