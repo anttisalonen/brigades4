@@ -23,7 +23,7 @@ pub fn execute_action(action: &ai::Action, bf: &mut bf_info::Battlefield, prev_c
         &ai::Action::ShootAction(from, to)  => shoot_soldier(from, to, bf),
         &ai::Action::BoardAction(s, tr)     => board_truck(bf, s, tr),
         &ai::Action::DriveAction(s, st, ga) => drive_truck(bf, s, st, ga),
-        &ai::Action::DisembarkAction(s)     => disembark_truck(bf, s),
+        &ai::Action::DisembarkAction(s)     => disembark_truck(&mut bf.movers.boarded_map, s),
     }
 }
 
@@ -35,16 +35,16 @@ pub fn has_tick(bf: &bf_info::Battlefield, prev_curr_time: f64, tick: i32) -> bo
 }
 
 fn move_soldier(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, diff: Vector3<f64>) -> () {
-    if bf_info::soldier_boarded(bf, sid) != None {
+    if bf_info::soldier_boarded(&bf.movers.boarded_map, sid) != None {
         return;
     }
-    let ref mut s = bf.soldiers[sid.id];
+    let ref mut s = bf.movers.soldiers[sid.id];
     s.position += gameutil::truncate(diff, bf_info::SOLDIER_SPEED * bf.frame_time as f64);
 }
 
 fn idle_soldier(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, prev_curr_time: f64) -> () {
     let check_supply = has_tick(bf, prev_curr_time, SUPPLY_TIME);
-    let ref mut soldier = bf.soldiers[sid.id];
+    let ref mut soldier = bf.movers.soldiers[sid.id];
     if soldier.shot_timer > 0.0 {
         soldier.shot_timer -= bf.frame_time as f64;
     }
@@ -66,48 +66,64 @@ fn idle_soldier(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, prev_cur
     }
 }
 
-pub fn kill_soldier(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID) -> () {
-    bf.soldiers[sid.id].alive = false;
-    disembark_truck(bf, sid);
+fn disembark_all_from_truck(boarded_map: &mut bf_info::BoardedMap, tid: bf_info::TruckID) -> () {
+    if let Some(bds) = boarded_map.map.get_mut(&tid) {
+        bds.clear();
+    }
+}
+
+pub fn destroy_truck(boarded_map: &mut bf_info::BoardedMap, truck: &mut bf_info::Truck) -> () {
+    truck.alive = false;
+    disembark_all_from_truck(boarded_map, truck.id);
+}
+
+pub fn kill_soldier(boarded_map: &mut bf_info::BoardedMap, soldier: &mut bf_info::Soldier) -> () {
+    soldier.alive = false;
+    disembark_truck(boarded_map, soldier.id);
 }
 
 fn shoot_soldier(from: bf_info::SoldierID, to: bf_info::SoldierID, mut bf: &mut bf_info::Battlefield) {
-    if bf_info::soldier_boarded(bf, from) != None {
+    if bf_info::soldier_boarded(&bf.movers.boarded_map, from) != None {
         return;
     }
 
-    if bf.soldiers[from.id].ammo <= 0 {
+    if bf.movers.soldiers[from.id].ammo <= 0 {
         return;
     }
 
-    if bf.soldiers[from.id].shot_timer <= 0.0 {
-        bf.soldiers[from.id].shot_timer = 1.0;
-        bf.soldiers[from.id].ammo -= 1;
-        let dist = gameutil::dist(&bf.soldiers[from.id], &bf.soldiers[to.id].position);
+    if bf.movers.soldiers[from.id].shot_timer <= 0.0 {
+        bf.movers.soldiers[from.id].shot_timer = 1.0;
+        bf.movers.soldiers[from.id].ammo -= 1;
+        let dist = gameutil::dist(&bf.movers.soldiers[from.id], &bf.movers.soldiers[to.id].position);
         let threshold = if dist > 100.0 { 0.0 } else { -dist * 0.005 + 1.0 };
         let hit_num = bf.rand();
         if hit_num < threshold {
-            kill_soldier(&mut bf, to);
+            kill_soldier(&mut bf.movers.boarded_map, &mut bf.movers.soldiers[to.id]);
         }
         println!("{} shoots at {}! {} ({} - threshold was {})",
-        from.id, to.id, hit_num, !bf.soldiers[to.id].alive, threshold);
+        from.id, to.id, hit_num, !bf.movers.soldiers[to.id].alive, threshold);
     }
 }
 
 fn board_truck(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, tid: bf_info::TruckID) -> () {
     if bf_info::truck_free_by_id(bf, tid) &&
-        gameutil::dist(&bf.soldiers[sid.id], &bf.trucks[tid.id].position) < 3.0 {
-        set_boarded(bf, sid, tid);
+        gameutil::dist(&bf.movers.soldiers[sid.id], &bf.movers.trucks[tid.id].position) < 3.0 {
+        set_boarded(&mut bf.movers, sid, tid);
     }
 }
 
 fn drive_truck(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, steering: f64, gas: f64) -> () {
-    let mtid = bf_info::soldier_boarded(bf, sid);
+    let mtid = bf_info::soldier_boarded(&bf.movers.boarded_map, sid);
     if mtid == None {
         return;
     }
 
-    let ref mut truck = bf.trucks[mtid.unwrap().0.id];
+    let ref mut truck = bf.movers.trucks[mtid.unwrap().0.id];
+
+    if !truck.alive {
+        return;
+    }
+
     truck.direction = na::rotate(
         &Rotation3::new(Vector3::new(0.0, 0.2 * gameutil::clamp(-1.0, 1.0, steering) * bf.frame_time, 0.0)),
         &truck.direction);
@@ -119,14 +135,14 @@ fn drive_truck(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, steering:
     truck.position += truck.direction * truck.speed * bf.frame_time;
 }
 
-fn disembark_truck(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID) -> () {
-    let mid = bf_info::soldier_boarded(bf, sid);
+fn disembark_truck(boarded_map: &mut bf_info::BoardedMap, sid: bf_info::SoldierID) -> () {
+    let mid = bf_info::soldier_boarded(boarded_map, sid);
     match mid {
         None => (),
         Some((tid, role)) => {
-            unset_boarded(bf, sid);
+            unset_boarded(boarded_map, sid);
             if role == bf_info::BoardRole::Driver {
-                let boarded = bf.boarded_map.map.get_mut(&tid).unwrap();
+                let boarded = boarded_map.map.get_mut(&tid).unwrap();
                 if boarded.len() > 0 {
                     boarded[0].role = bf_info::BoardRole::Driver;
                 }
@@ -135,13 +151,13 @@ fn disembark_truck(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID) -> ()
     }
 }
 
-fn set_boarded(mut bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, tid: bf_info::TruckID) -> () {
-    if bf_info::soldier_boarded(bf, sid) != None {
+fn set_boarded(mut mov: &mut bf_info::Movers, sid: bf_info::SoldierID, tid: bf_info::TruckID) -> () {
+    if bf_info::soldier_boarded(&mov.boarded_map, sid) != None {
         println!("{} tried to board but is already boarded", sid.id);
         return;
     }
 
-    match bf.boarded_map.map.get_mut(&tid) {
+    match mov.boarded_map.map.get_mut(&tid) {
         Some(bds) => {
             let ln = bds.len();
             let role = if ln == 0 {
@@ -159,12 +175,12 @@ fn set_boarded(mut bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, tid: 
         },
         None => (),
     }
-    bf.boarded_map.map.insert(tid, vec![bf_info::Boarded{sid: sid, role: bf_info::BoardRole::Driver}]);
+    mov.boarded_map.map.insert(tid, vec![bf_info::Boarded{sid: sid, role: bf_info::BoardRole::Driver}]);
     println!("{} embarked truck {}!", sid.id, tid.id);
 }
 
-fn unset_boarded(mut bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID) -> () {
-    for (_, ref mut bds) in &mut bf.boarded_map.map {
+fn unset_boarded(mut boarded_map: &mut bf_info::BoardedMap, sid: bf_info::SoldierID) -> () {
+    for (_, ref mut bds) in &mut boarded_map.map {
         bds.retain(|ref mut bd| bd.sid != sid);
     }
 }

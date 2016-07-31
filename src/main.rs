@@ -13,6 +13,7 @@ mod ai;
 mod game;
 mod gameutil;
 mod prim;
+mod bf;
 mod bf_info;
 mod terrain;
 mod actions;
@@ -422,8 +423,8 @@ fn main() {
         draw_model_with_color(&gfx, &mut gfx_per_frame, &ground_positions, &ground_normals, &ground_colors, &ground_indices,
                    &IDENTITY_MATRIX, prim::ViewMode::Normal, &params);
 
-        for sold in game_state.bf.soldiers.iter() {
-            if bf_info::soldier_boarded(&game_state.bf, sold.id) != None {
+        for sold in game_state.bf.movers.soldiers.iter() {
+            if bf_info::soldier_boarded(&game_state.bf.movers.boarded_map, sold.id) != None {
                 continue;
             }
             let col = get_color(sold.alive, sold.side);
@@ -432,7 +433,7 @@ fn main() {
                        game_state.bf.view_mode, &params);
         }
 
-        for truck in game_state.bf.trucks.iter() {
+        for truck in game_state.bf.movers.trucks.iter() {
             let col = get_color(truck.alive, truck.side);
             draw_model(&gfx, &mut gfx_per_frame, &positions, &normals, &indices,
                        &truck_model_matrix(&truck, game_state.bf.view_mode), col,

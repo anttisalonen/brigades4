@@ -83,12 +83,17 @@ pub struct SupplyPoint {
     pub amount_ammo: i32,
 }
 
+pub struct Movers {
+    pub soldiers: Vec<Soldier>,
+    pub trucks: Vec<Truck>,
+    pub boarded_map: BoardedMap,
+}
+
 pub struct Battlefield {
     pub camera: Camera,
     pub view_mode: prim::ViewMode,
     pub mouse_look: bool,
     pub prev_mouse_position: Option<(i32, i32)>,
-    pub soldiers: Vec<Soldier>,
     pub ground: terrain::Ground,
     pub curr_time: f64,
     pub frame_time: f64,
@@ -98,8 +103,7 @@ pub struct Battlefield {
     pub rng: rand::StdRng,
     pub base_position: [Vector3<f64>; 2],
     pub supply_points: Vec<SupplyPoint>,
-    pub trucks: Vec<Truck>,
-    pub boarded_map: BoardedMap,
+    pub movers: Movers,
     pub pause: bool,
 }
 
@@ -151,7 +155,11 @@ impl Battlefield {
             view_mode: prim::ViewMode::Normal,
             mouse_look: false,
             prev_mouse_position: None,
-            soldiers: vec![],
+            movers: Movers {
+                soldiers: vec![],
+                trucks: vec![],
+                boarded_map: BoardedMap{map: HashMap::new()},
+            },
             ground: ground,
             curr_time: TIME_MULTIPLIER as f64 * 360.0,
             frame_time: 0.0,
@@ -165,8 +173,6 @@ impl Battlefield {
                 amount_food: 0,
                 amount_ammo: 0,
             }).collect(),
-            trucks: vec![],
-            boarded_map: BoardedMap{map: HashMap::new()},
             pause: false,
         }
     }
@@ -192,8 +198,8 @@ pub fn get_base_position(bf: &Battlefield, side: prim::Side) -> Vector3<f64> {
     bf.base_position[if side == prim::Side::Red { 1 } else { 0 }]
 }
 
-pub fn soldier_boarded(bf: &Battlefield, s: SoldierID) -> Option<(TruckID, BoardRole)> {
-    for (tid, bds) in &bf.boarded_map.map {
+pub fn soldier_boarded(boarded_map: &BoardedMap, s: SoldierID) -> Option<(TruckID, BoardRole)> {
+    for (tid, bds) in &boarded_map.map {
         for bd in bds {
             if bd.sid == s {
                 return Some((*tid, bd.role));
@@ -204,7 +210,11 @@ pub fn soldier_boarded(bf: &Battlefield, s: SoldierID) -> Option<(TruckID, Board
 }
 
 pub fn truck_free_by_id(bf: &Battlefield, truck: TruckID) -> bool {
-    if let Some(ref bds) = bf.boarded_map.map.get(&truck) {
+    if !bf.movers.trucks[truck.id].alive {
+        return false;
+    }
+
+    if let Some(ref bds) = bf.movers.boarded_map.map.get(&truck) {
         if bds.len() < TRUCK_NUM_PASSENGERS as usize + 1 {
             return true;
         } else {
@@ -220,7 +230,7 @@ pub fn truck_free(bf: &Battlefield, truck: &Truck) -> bool {
 }
 
 pub fn num_passengers(bf: &Battlefield, truck: &Truck) -> i32 {
-    match bf.boarded_map.map.get(&truck.id) {
+    match bf.movers.boarded_map.map.get(&truck.id) {
         None => 0,
         Some(b) => std::cmp::max(0, b.len() as i32 - 1),
     }

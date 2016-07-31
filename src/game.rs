@@ -163,9 +163,9 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
 
 fn get_actions(ai: &mut AiState, bf: &bf_info::Battlefield) -> Vec<ai::Action> {
     let mut ret = Vec::new();
-    for i in 0..bf.soldiers.len() {
-        if bf.soldiers[i].alive {
-            ret.push(ai::soldier_ai_update(&mut ai.soldier_ai[i], &bf.soldiers[i], &bf));
+    for i in 0..bf.movers.soldiers.len() {
+        if bf.movers.soldiers[i].alive {
+            ret.push(ai::soldier_ai_update(&mut ai.soldier_ai[i], &bf.movers.soldiers[i], &bf));
         }
     }
     return ret;
@@ -174,7 +174,7 @@ fn get_actions(ai: &mut AiState, bf: &bf_info::Battlefield) -> Vec<ai::Action> {
 fn check_flags(gs: &mut GameState) -> () {
     for ref mut flag in &mut gs.bf.flags {
         let mut holding = [false, false];
-        for sold in gs.bf.soldiers.iter() {
+        for sold in gs.bf.movers.soldiers.iter() {
             if sold.alive {
                 let dist = gameutil::dist(&sold, &flag.position);
                 if dist < 20.0 {
@@ -227,49 +227,45 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
     for action in actions {
         actions::execute_action(&action, &mut game_state.bf, prev_curr_time);
     }
-    for ref mut sold in &mut game_state.bf.soldiers {
-        sold.position.y = f64::max(0.0, terrain::get_height_at(&game_state.bf.ground, sold.position.x, sold.position.z));
-    }
-    for ref mut truck in &mut game_state.bf.trucks {
-        truck.position.y = f64::max(0.0, terrain::get_height_at(&game_state.bf.ground, truck.position.x, truck.position.z));
-        truck.speed = truck.speed * (1.0 - 0.10 * game_state.bf.frame_time);
-    }
-    for (tid, bds) in &game_state.bf.boarded_map.map {
+    game_state.bf.update_soldiers();
+    game_state.bf.update_trucks();
+
+    for (tid, bds) in &game_state.bf.movers.boarded_map.map {
         for bd in bds.iter() {
-            game_state.bf.soldiers[bd.sid.id].position = game_state.bf.trucks[tid.id].position;
+            game_state.bf.movers.soldiers[bd.sid.id].position = game_state.bf.movers.trucks[tid.id].position;
         }
     }
 
     let mut reaped = false;
-    for i in 0..game_state.bf.soldiers.len() {
-        if reaped && i >= game_state.bf.soldiers.len() {
+    for i in 0..game_state.bf.movers.soldiers.len() {
+        if reaped && i >= game_state.bf.movers.soldiers.len() {
             break;
         }
-        if ! game_state.bf.soldiers[i].alive {
-            game_state.bf.soldiers[i].reap_timer -= game_state.bf.frame_time as f64;
-            if game_state.bf.soldiers[i].reap_timer < 0.0 {
+        if ! game_state.bf.movers.soldiers[i].alive {
+            game_state.bf.movers.soldiers[i].reap_timer -= game_state.bf.frame_time as f64;
+            if game_state.bf.movers.soldiers[i].reap_timer < 0.0 {
                 game_state.ai.soldier_ai.swap_remove(i);
-                game_state.bf.soldiers.swap_remove(i);
+                game_state.bf.movers.soldiers.swap_remove(i);
                 reaped = true;
             }
         } else {
-            game_state.bf.soldiers[i].eat_timer -= game_state.bf.frame_time as f64;
-            if game_state.bf.soldiers[i].eat_timer <= 0.0 {
-                game_state.bf.soldiers[i].eat_timer += bf_info::EAT_TIME;
-                game_state.bf.soldiers[i].food -= 1;
-                if game_state.bf.soldiers[i].food < 0 {
+            game_state.bf.movers.soldiers[i].eat_timer -= game_state.bf.frame_time as f64;
+            if game_state.bf.movers.soldiers[i].eat_timer <= 0.0 {
+                game_state.bf.movers.soldiers[i].eat_timer += bf_info::EAT_TIME;
+                game_state.bf.movers.soldiers[i].food -= 1;
+                if game_state.bf.movers.soldiers[i].food < 0 {
                     println!("Soldier starved!");
-                    actions::kill_soldier(&mut game_state.bf, bf_info::SoldierID{id: i});
+                    actions::kill_soldier(&mut game_state.bf.movers.boarded_map, &mut game_state.bf.movers.soldiers[i]);
                 }
             }
         }
     }
     if reaped {
-        for i in 0..game_state.bf.soldiers.len() {
-            let old_id = game_state.bf.soldiers[i].id;
+        for i in 0..game_state.bf.movers.soldiers.len() {
+            let old_id = game_state.bf.movers.soldiers[i].id;
             let id = bf_info::SoldierID{id: i};
-            game_state.bf.soldiers[i].id = id;
-            update_boarded(&mut game_state.bf.boarded_map, old_id, id);
+            game_state.bf.movers.soldiers[i].id = id;
+            update_boarded(&mut game_state.bf.movers.boarded_map, old_id, id);
         }
     }
 }
@@ -289,12 +285,12 @@ fn update_boarded(boarded_map: &mut bf_info::BoardedMap, old_id: bf_info::Soldie
 
 fn spawn_soldiers(gs: &mut GameState, num: i32) -> () {
     for side in [prim::Side::Blue, prim::Side::Red].iter() {
-        let num_soldiers = gs.bf.soldiers.iter().filter(|s| s.side == *side).count() as i32;
+        let num_soldiers = gs.bf.movers.soldiers.iter().filter(|s| s.side == *side).count() as i32;
         let mut pos = gs.bf.base_position[if *side == prim::Side::Red { 1 } else { 0 }];
         for _ in 0..(std::cmp::min(num, MAX_SOLDIERS_PER_SIDE - num_soldiers)) {
             pos.z += 10.0;
             spawn_soldier(pos,
-                          &mut gs.bf.soldiers,
+                          &mut gs.bf.movers.soldiers,
                           &mut gs.ai.soldier_ai, *side);
         }
     }
@@ -302,14 +298,14 @@ fn spawn_soldiers(gs: &mut GameState, num: i32) -> () {
 
 fn spawn_trucks(gs: &mut GameState, num: i32) -> () {
     for side in [prim::Side::Blue, prim::Side::Red].iter() {
-        let num_trucks = gs.bf.trucks.iter().filter(|s| s.side == *side).count() as i32;
+        let num_trucks = gs.bf.movers.trucks.iter().filter(|s| s.side == *side).count() as i32;
         let mut pos = gs.bf.base_position[if *side == prim::Side::Red { 1 } else { 0 }];
         pos.x += 100.0;
         for _ in 0..(std::cmp::min(num, MAX_TRUCKS_PER_SIDE - num_trucks)) {
             pos.z += 20.0;
             pos.y = terrain::get_height_at(&gs.bf.ground, pos.x, pos.z);
             spawn_truck(pos,
-                        &mut gs.bf.trucks,
+                        &mut gs.bf.movers.trucks,
                         *side);
         }
     }

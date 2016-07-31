@@ -85,7 +85,7 @@ pub fn find_path(ground: &terrain::Ground, p1: Vector3<f64>, p2: Vector3<f64>) -
 
                 let pos = Vector2::new(n.x + i as i64, n.y + j as i64);
                 i += STEP;
-                if terrain::get_height_at(ground, pos.x as f64, pos.y as f64) < -1.0 {
+                if terrain::get_height_at(ground, pos.x as f64, pos.y as f64) < 1.0 {
                     continue;
                 }
                 if pos.x <= -prim::HDIM as i64 || pos.x >= prim::HDIM as i64 ||

@@ -115,7 +115,7 @@ enum Status {
 }
 
 fn get_status(bf: &Battlefield, s: &Soldier) -> Status {
-    match soldier_boarded(bf, s.id) {
+    match soldier_boarded(&bf.movers.boarded_map, s.id) {
         Some((tid, BoardRole::Driver))    => Status::Driving(tid),
         Some((tid, BoardRole::Passenger)) => Status::Boarded(tid),
         _                                 => Status::OnFoot,
@@ -136,7 +136,7 @@ fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> Vec<AiTask> {
     } else {
         match st {
             Status::Driving(tid) => {
-                let ref truck = bf.trucks[tid.id];
+                let ref truck = bf.movers.trucks[tid.id];
                 if have_enough_passengers(bf, truck) {
                     // taxi
                     find_drive_path(&bf.ground, s.position, flag_target_position(s, bf))
@@ -177,7 +177,7 @@ fn find_drive_path(ground: &terrain::Ground, mypos: Vector3<f64>, targetpos: Vec
 
 // generic helpers
 fn free_truck_nearby(s: &Soldier, bf: &Battlefield) -> Option<(Vector3<f64>, TruckID)> {
-    let zm = sort_by_distance!(s, &bf.trucks);
+    let zm = sort_by_distance!(s, &bf.movers.trucks);
     for (dist, truck) in zm {
         if dist > 1000.0 {
             return None;
@@ -212,7 +212,7 @@ fn flag_lone_holder(sold: &Soldier, bf: &Battlefield, pos: &Vector3<f64>) -> boo
     }
 
     let side = sold.side;
-    for sn in bf.soldiers.iter() {
+    for sn in bf.movers.soldiers.iter() {
         if sn.side == side && gameutil::dist(sn, pos) < 5.0 {
             num_guards -= 1;
             if num_guards == 0 {
@@ -270,8 +270,8 @@ fn find_enemy(soldier: &Soldier, bf: &Battlefield) -> Option<SoldierID> {
         return None;
     }
 
-    for i in 0..bf.soldiers.len() {
-        if bf.soldiers[i].alive && bf.soldiers[i].side != soldier.side && gameutil::dist(soldier, &bf.soldiers[i].position) < SHOOT_DISTANCE {
+    for i in 0..bf.movers.soldiers.len() {
+        if bf.movers.soldiers[i].alive && bf.movers.soldiers[i].side != soldier.side && gameutil::dist(soldier, &bf.movers.soldiers[i].position) < SHOOT_DISTANCE {
             return Some(SoldierID{id: i})
         }
     }
@@ -306,9 +306,9 @@ fn ai_goto(bf: &Battlefield, targetpos: &Vector3<f64>, soldier: &Soldier) -> Act
 
 fn attack(e: SoldierID, soldier: &Soldier, bf: &Battlefield) -> Action {
     assert!(soldier.ammo > 0);
-    let dist = (bf.soldiers[e.id].position - soldier.position).norm();
+    let dist = (bf.movers.soldiers[e.id].position - soldier.position).norm();
     if dist > SHOOT_DISTANCE {
-        ai_goto(bf, &bf.soldiers[e.id].position, soldier)
+        ai_goto(bf, &bf.movers.soldiers[e.id].position, soldier)
     } else {
         if soldier.shot_timer <= 0.0 {
             Action::ShootAction(soldier.id, e)
@@ -370,7 +370,7 @@ impl Task for AiDrive {
     fn update(&mut self, soldier: &Soldier, bf: &Battlefield) -> Option<Action> {
         let st = get_status(bf, soldier);
         if let Status::Driving(tid) = st {
-            let ref truck = bf.trucks[tid.id];
+            let ref truck = bf.movers.trucks[tid.id];
             let tgt_vec = gameutil::to_vec_on_map(soldier, &self.targetpos);
             let dist_to_tgt = tgt_vec.norm();
             let norm_tgt_vec = tgt_vec.normalize();
