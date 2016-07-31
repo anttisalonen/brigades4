@@ -255,11 +255,11 @@ impl Task for AiGoto {
             Status::OnFoot => {
                 let enemy_tgt = find_enemy(soldier, bf);
                 match enemy_tgt {
-                    None    => Some(ai_goto(bf, &self.targetpos, soldier)),
+                    None    => Some(ai_goto(&self.targetpos, soldier, st)),
                     Some(e) => Some(attack(e, soldier, &bf)),
                 }
             },
-            Status::Boarded(_) => Some(ai_goto(bf, &self.targetpos, soldier)),
+            Status::Boarded(_) => Some(ai_goto(&self.targetpos, soldier, st)),
             Status::Driving(_) => None,
         }
     }
@@ -278,8 +278,7 @@ fn find_enemy(soldier: &Soldier, bf: &Battlefield) -> Option<SoldierID> {
     None
 }
 
-fn ai_goto(bf: &Battlefield, targetpos: &Vector3<f64>, soldier: &Soldier) -> Action {
-    let st = get_status(bf, soldier);
+fn ai_goto(targetpos: &Vector3<f64>, soldier: &Soldier, st: Status) -> Action {
     let tgt_vec = gameutil::to_vec_on_map(soldier, targetpos);
     let dist_to_tgt = tgt_vec.norm();
     match st {
@@ -308,7 +307,8 @@ fn attack(e: SoldierID, soldier: &Soldier, bf: &Battlefield) -> Action {
     assert!(soldier.ammo > 0);
     let dist = (bf.movers.soldiers[e.id].position - soldier.position).norm();
     if dist > SHOOT_DISTANCE {
-        ai_goto(bf, &bf.movers.soldiers[e.id].position, soldier)
+        let st = get_status(bf, soldier);
+        ai_goto(&bf.movers.soldiers[e.id].position, soldier, st)
     } else {
         if soldier.shot_timer <= 0.0 {
             Action::ShootAction(soldier.id, e)
@@ -335,7 +335,8 @@ impl AiBoard {
 // board task - update function
 impl Task for AiBoard {
     fn update(&mut self, soldier: &Soldier, bf: &Battlefield) -> Option<Action> {
-        if get_status(bf, soldier) != Status::OnFoot {
+        let st = get_status(bf, soldier);
+        if st != Status::OnFoot {
             None
         } else {
             if gameutil::dist(soldier, &self.targetpos) < 3.0 {
@@ -345,7 +346,7 @@ impl Task for AiBoard {
                     None
                 }
             } else {
-                Some(ai_goto(bf, &self.targetpos, soldier))
+                Some(ai_goto(&self.targetpos, soldier, st))
             }
         }
     }
