@@ -2,6 +2,7 @@ extern crate nalgebra as na;
 extern crate core;
 extern crate rand;
 
+use std::collections::VecDeque;
 use self::core::iter::FromIterator;
 
 use na::{Vector3, Norm, Dot, Cross};
@@ -11,15 +12,14 @@ use bf_info::*;
 use gameutil;
 use prim;
 use navmap;
-use terrain;
 
 const SHOOT_DISTANCE: f64 = 100.0;
-const REPLAN_TIME: f64       = TIME_MULTIPLIER as f64 * 120.0; // seconds
+const REPLAN_TIME: f64       = TIME_MULTIPLIER as f64 * 3600.0; // seconds
 const FOOD_FETCH_BUFFER: f64 = TIME_MULTIPLIER as f64 * 480.0; // seconds
 
 // data structures
 pub struct SoldierAI {
-    tasks: Vec<AiTask>,
+    tasks: VecDeque<AiTask>,
     replan_timer: f64,
 }
 
@@ -44,6 +44,20 @@ macro_rules! sort_by_distance {
     };
 }
 
+macro_rules! find_best_path {
+    ( $ground:expr, $soldier:expr, $items:expr, $name:expr ) => {
+        {
+            let maybe_paths = $items.iter().map(|item| navmap::find_path($ground, $soldier.position, item.pos(), $name, 2000));
+            let zm = maybe_paths.zip($items.iter());
+            let zm = zm.filter(|&(ref p, _)| p.is_some());
+            let zm = zm.map(|(p, i)| (p.unwrap(), i));
+            let mut zm = Vec::from_iter(zm);
+            zm.sort_by(|&(ref p1, _), &(ref p2, _)| p1.len().partial_cmp(&p2.len()).unwrap());
+            zm
+        }
+    };
+}
+
 // core code
 trait Task {
     fn update(&mut self, soldier: &Soldier, bf: &Battlefield) -> Option<Action>;
@@ -56,6 +70,7 @@ impl Task for AiTask {
             &mut AiTask::Board(ref mut g) => g.update(soldier, bf),
             &mut AiTask::Drive(ref mut g) => g.update(soldier, bf),
             &mut AiTask::Sleep(ref mut g) => g.update(soldier, bf),
+            &mut AiTask::Taxi(ref mut g)  => g.update(soldier, bf),
         }
     }
 }
@@ -63,7 +78,7 @@ impl Task for AiTask {
 impl SoldierAI {
     pub fn new() -> SoldierAI {
         SoldierAI {
-            tasks: vec![],
+            tasks: VecDeque::new(),
             replan_timer: rand::random::<f64>() * REPLAN_TIME,
         }
     }
@@ -72,31 +87,27 @@ impl SoldierAI {
 pub fn soldier_ai_update(sai: &mut SoldierAI, soldier: &Soldier, bf: &Battlefield) -> Action {
     sai.replan_timer -= bf.frame_time;
     if sai.replan_timer <= 0.0 {
-        sai.replan_timer += REPLAN_TIME * (rand::random::<f64>() * 2.0);
-        sai.tasks = vec![];
+        sai.replan_timer += REPLAN_TIME * 0.5 + REPLAN_TIME * (rand::random::<f64>());
+        sai.tasks = VecDeque::new();
     }
     if sai.tasks.len() == 0 {
         sai.tasks.append(&mut ai_arbitrate_task(soldier, bf));
     }
     let num_tasks = sai.tasks.len();
     if num_tasks > 0 {
-        let act = sai.tasks[num_tasks - 1].update(soldier, bf);
+        let act = sai.tasks.front_mut().unwrap().update(soldier, bf);
         match act {
-            None    => sai.tasks.truncate(num_tasks - 1),
+            None    => { sai.tasks.pop_front(); (); }
             Some(a) => return a,
         }
     }
     return Action::NoAction(soldier.id);
 }
 
-fn find_nearest_supply(bf: &Battlefield, s: &Soldier, st: Status) -> Option<Vector3<f64>> {
-    match st {
-        Status::Driving(_) => return Some(get_base_position(bf, s.side)),
-        _                  => (),
-    };
+fn find_nearest_supply(bf: &Battlefield, s: &Soldier, max_dist: f64) -> Option<Vector3<f64>> {
     let zm = sort_by_distance!(s, &bf.supply_points);
     for (dist, supply) in zm {
-        if dist > 1000.0 {
+        if dist > max_dist {
             return None;
         }
         if supply.amount_food < 3 && supply.amount_ammo < 3 {
@@ -122,16 +133,23 @@ fn get_status(bf: &Battlefield, s: &Soldier) -> Status {
     }
 }
 
-fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> Vec<AiTask> {
+fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> VecDeque<AiTask> {
     let st = get_status(bf, s);
-    let supply = find_nearest_supply(bf, s, st);
 
     let time_with_food = EAT_TIME * (s.food - 1) as f64;
 
-    if supply != None && (time_with_food < FOOD_FETCH_BUFFER || s.ammo < 5) {
+    if time_with_food < FOOD_FETCH_BUFFER || s.ammo < 5 {
         match st {
-            Status::Driving(_) => find_drive_path(&bf.ground, s.position, supply.unwrap()),
-            _                  => vec![AiTask::Goto(AiGoto::new(supply.unwrap()))],
+            Status::Driving(_) => drive_path(navmap::find_path(&bf.ground, s.position, get_base_position(bf, s.side), "ai:driving:nearest supply", 2000), false),
+            _                  => {
+                if let Some(pos) = find_nearest_supply(bf, s, 2000.0) {
+                    vec![AiTask::Goto(AiGoto::new(pos))].into_iter().collect()
+                } else if let Some(pos) = find_nearest_supply(bf, s, 30000.0) {
+                    walk_path(s, bf, pos, "ai:walking:nearest supply")
+                } else {
+                    vec![AiTask::Sleep(AiSleep::new(game_minutes(10.0)))].into_iter().collect()
+                }
+            },
         }
     } else {
         match st {
@@ -139,47 +157,76 @@ fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> Vec<AiTask> {
                 let ref truck = bf.movers.trucks[tid.id];
                 if have_enough_passengers(bf, truck) {
                     // taxi
-                    find_drive_path(&bf.ground, s.position, flag_target_position(s, bf))
+                    drive_path(flag_target_position(s, bf), true)
                 } else {
                     // back home
                     let bp = get_base_position(bf, s.side);
                     let dist = gameutil::dist(s, &bp);
                     if dist < 50.0 {
-                        vec![AiTask::Sleep(AiSleep::new(15.0 * 60.0))]
+                        vec![AiTask::Sleep(AiSleep::new(game_minutes(60.0)))].into_iter().collect()
                     } else {
-                        find_drive_path(&bf.ground, s.position, bp)
+                        drive_path(navmap::find_path(&bf.ground, s.position, bp, "ai:arbitrate:driving:back home", 2000), false)
                     }
                 }
             },
-            Status::Boarded(_) => vec![AiTask::Goto(AiGoto::new(flag_target_position(s, bf)))],
+            Status::Boarded(_) => taxi_to_dest(),
             Status::OnFoot     => {
-                if let Some(truck) = free_truck_nearby(s, bf) {
-                    vec![AiTask::Board(AiBoard::new(truck.0))]
-                } else {
-                    vec![AiTask::Goto(AiGoto::new(flag_target_position(s, bf)))]
+                let walk_dist = flag_nearby(s, bf, 2000.0);
+                match walk_dist {
+                    Some(pos) => vec![AiTask::Goto(AiGoto::new(pos))].into_iter().collect(),
+                    None      => {
+                        if let Some(truck) = free_truck_nearby(s, bf) {
+                            vec![AiTask::Board(AiBoard::new(truck.0))].into_iter().collect()
+                        } else if let Some(pos) = flag_nearby(s, bf, 30000.0) {
+                            walk_path(s, bf, pos, "ai:walking:nearest flag")
+                        } else {
+                            vec![AiTask::Sleep(AiSleep::new(game_minutes(10.0)))].into_iter().collect()
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-fn find_drive_path(ground: &terrain::Ground, mypos: Vector3<f64>, targetpos: Vector3<f64>) -> Vec<AiTask> {
-    let mpath = navmap::find_path(ground, mypos, targetpos);
+fn taxi_to_dest() -> VecDeque<AiTask> {
+    vec![AiTask::Taxi(AiTaxi::new())].into_iter().collect()
+}
+
+fn path_to_tasks<F>(mpath: Option<navmap::Path>, to_task: F, stop_before_end: bool, direct_if_no_path: Option<Vector3<f64>>) -> VecDeque<AiTask>
+    where F: Fn(Vector3<f64>) -> AiTask {
     match mpath {
-        None       => vec![AiTask::Sleep(AiSleep::new(15.0 * 60.0))],
+        None       => match direct_if_no_path {
+            Some(pos) => vec![to_task(pos)].into_iter().collect(),
+            None      => vec![AiTask::Sleep(AiSleep::new(game_minutes(60.0)))].into_iter().collect()
+        },
         Some(path) => {
-            path.iter().rev().map(|node| {
-                AiTask::Drive(AiDrive::new(Vector3::new(node.x as f64, 0.0, node.y as f64)))
-            }).collect()
+            let mut ret: VecDeque<AiTask> = path.iter().map(|node| {
+                to_task(Vector3::new(node.x as f64, 0.0, node.y as f64))
+            }).collect();
+            if stop_before_end && path.len() > 3 {
+                ret.pop_back();
+                ret.pop_back();
+            }
+            ret
         }
     }
+}
+
+fn walk_path(s: &Soldier, bf: &Battlefield, pos: Vector3<f64>, msg: &str) -> VecDeque<AiTask> {
+    let mpath = navmap::find_path(&bf.ground, s.position, pos, msg, 100);
+    path_to_tasks(mpath, |p| AiTask::Goto(AiGoto::new(p)), false, Some(pos))
+}
+
+fn drive_path(mpath: Option<navmap::Path>, stop_before_end: bool) -> VecDeque<AiTask> {
+    path_to_tasks(mpath, |p| AiTask::Drive(AiDrive::new(p)), stop_before_end, None)
 }
 
 // generic helpers
 fn free_truck_nearby(s: &Soldier, bf: &Battlefield) -> Option<(Vector3<f64>, TruckID)> {
     let zm = sort_by_distance!(s, &bf.movers.trucks);
     for (dist, truck) in zm {
-        if dist > 1000.0 {
+        if dist > 5000.0 {
             return None;
         }
         if !truck_free(bf, &truck) {
@@ -190,19 +237,37 @@ fn free_truck_nearby(s: &Soldier, bf: &Battlefield) -> Option<(Vector3<f64>, Tru
     return None;
 }
 
-fn flag_target_position(sold: &Soldier, bf: &Battlefield) -> Vector3<f64> {
-    let side = sold.side;
+fn flag_nearby(sold: &Soldier, bf: &Battlefield, max_dist: f64) -> Option<Vector3<f64>> {
     let zm = sort_by_distance!(sold, &bf.flags);
-    for (_, flag) in zm {
-        match flag.flag_state {
-            prim::FlagState::Free                       => return flag.position,
-            prim::FlagState::Transition(s) if s == side => (),
-            prim::FlagState::Transition(_)              => return flag.position,
-            prim::FlagState::Owned(s) if s == side      => if flag_lone_holder(sold, bf, &flag.position) { return flag.position; } else { () },
-            prim::FlagState::Owned(_)                   => return flag.position,
+    for (dist, flag) in zm {
+        if dist > max_dist {
+            return None;
+        }
+        if interesting_flag(sold, bf, &flag) {
+            return Some(flag.position);
         }
     }
-    bf.flags[0].position
+    return None;
+}
+
+fn interesting_flag(sold: &Soldier, bf: &Battlefield, flag: &prim::Flag) -> bool {
+    match flag.flag_state {
+        prim::FlagState::Free                            => true,
+        prim::FlagState::Transition(s) if s == sold.side => false,
+        prim::FlagState::Transition(_)                   => true,
+        prim::FlagState::Owned(s) if s == sold.side      => flag_lone_holder(sold, bf, &flag.position),
+        prim::FlagState::Owned(_)                        => true,
+    }
+}
+
+fn flag_target_position(sold: &Soldier, bf: &Battlefield) -> Option<navmap::Path> {
+    let zm = find_best_path!(&bf.ground, sold, &bf.flags, "ai:nearest flag");
+    for (path, flag) in zm {
+        if interesting_flag(sold, bf, &flag) {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn flag_lone_holder(sold: &Soldier, bf: &Battlefield, pos: &Vector3<f64>) -> bool {
@@ -230,6 +295,7 @@ enum AiTask {
     Board(AiBoard),
     Drive(AiDrive),
     Sleep(AiSleep),
+    Taxi(AiTaxi),
 }
 
 // goto: if enemy is within shooting range, stop to shoot.
@@ -255,11 +321,11 @@ impl Task for AiGoto {
             Status::OnFoot => {
                 let enemy_tgt = find_enemy(soldier, bf);
                 match enemy_tgt {
-                    None    => Some(ai_goto(&self.targetpos, soldier, st)),
-                    Some(e) => Some(attack(e, soldier, &bf)),
+                    None    => ai_goto(&self.targetpos, soldier, st),
+                    Some(e) => attack(e, soldier, &bf),
                 }
             },
-            Status::Boarded(_) => Some(ai_goto(&self.targetpos, soldier, st)),
+            Status::Boarded(_) => Some(Action::DisembarkAction(soldier.id)),
             Status::Driving(_) => None,
         }
     }
@@ -278,32 +344,28 @@ fn find_enemy(soldier: &Soldier, bf: &Battlefield) -> Option<SoldierID> {
     None
 }
 
-fn ai_goto(targetpos: &Vector3<f64>, soldier: &Soldier, st: Status) -> Action {
+fn ai_goto(targetpos: &Vector3<f64>, soldier: &Soldier, st: Status) -> Option<Action> {
     let tgt_vec = gameutil::to_vec_on_map(soldier, targetpos);
     let dist_to_tgt = tgt_vec.norm();
     match st {
         Status::OnFoot => {
             if dist_to_tgt >= 1.0 {
-                Action::MoveAction(soldier.id, tgt_vec.normalize() * SOLDIER_SPEED)
+                Some(Action::MoveAction(soldier.id, tgt_vec.normalize() * SOLDIER_SPEED))
             } else {
-                Action::NoAction(soldier.id)
+                None
             }
         },
         Status::Boarded(_) => {
-            if dist_to_tgt < 1000.0 {
-                Action::DisembarkAction(soldier.id)
-            } else {
-                Action::NoAction(soldier.id)
-            }
+            Some(Action::DisembarkAction(soldier.id))
         },
         Status::Driving(_) => {
             assert!(false);
-            Action::NoAction(soldier.id)
+            None
         }
     }
 }
 
-fn attack(e: SoldierID, soldier: &Soldier, bf: &Battlefield) -> Action {
+fn attack(e: SoldierID, soldier: &Soldier, bf: &Battlefield) -> Option<Action> {
     assert!(soldier.ammo > 0);
     let dist = (bf.movers.soldiers[e.id].position - soldier.position).norm();
     if dist > SHOOT_DISTANCE {
@@ -311,9 +373,9 @@ fn attack(e: SoldierID, soldier: &Soldier, bf: &Battlefield) -> Action {
         ai_goto(&bf.movers.soldiers[e.id].position, soldier, st)
     } else {
         if soldier.shot_timer <= 0.0 {
-            Action::ShootAction(soldier.id, e)
+            Some(Action::ShootAction(soldier.id, e))
         } else {
-            Action::NoAction(soldier.id)
+            Some(Action::NoAction(soldier.id))
         }
     }
 }
@@ -346,7 +408,7 @@ impl Task for AiBoard {
                     None
                 }
             } else {
-                Some(ai_goto(&self.targetpos, soldier, st))
+                ai_goto(&self.targetpos, soldier, st)
             }
         }
     }
@@ -422,6 +484,45 @@ impl Task for AiSleep {
         self.time -= bf.frame_time;
         if self.time < 0.0 {
             None
+        } else {
+            Some(Action::NoAction(soldier.id))
+        }
+    }
+}
+
+// taxi: sleep until the vehicle has stopped.
+struct AiTaxi {
+    wait_time: f64,
+}
+
+fn game_minutes(m: f64) -> f64 {
+    TIME_MULTIPLIER as f64 * m
+}
+
+impl AiTaxi {
+    fn new() -> AiTaxi {
+        AiTaxi {
+            wait_time: game_minutes(2.0)
+        }
+    }
+}
+
+impl Task for AiTaxi {
+    fn update(&mut self, soldier: &Soldier, bf: &Battlefield) -> Option<Action> {
+        self.wait_time -= bf.frame_time;
+        if self.wait_time <= 0.0 {
+            self.wait_time += game_minutes(2.0);
+            let st = get_status(bf, soldier);
+            match st {
+                Status::Boarded(_) => {
+                    if flag_nearby(soldier, bf, 1000.0).is_some() {
+                        Some(Action::DisembarkAction(soldier.id))
+                    } else {
+                        Some(Action::NoAction(soldier.id))
+                    }
+                },
+                _ => None,
+            }
         } else {
             Some(Action::NoAction(soldier.id))
         }

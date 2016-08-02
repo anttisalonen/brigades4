@@ -99,9 +99,9 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
                     glium::glutin::VirtualKeyCode::Add      => game_state.bf.time_accel = change_time_accel(game_state.bf.time_accel, true),
                     glium::glutin::VirtualKeyCode::Subtract => game_state.bf.time_accel = change_time_accel(game_state.bf.time_accel, false),
                     glium::glutin::VirtualKeyCode::P => game_state.bf.pause = !game_state.bf.pause,
-                    glium::glutin::VirtualKeyCode::I => println!("Position: {}\nTime: {} {}",
+                    glium::glutin::VirtualKeyCode::I => println!("Position: {}, direction{}\nTime: {}",
                                                                  game_state.bf.camera.position,
-                                                                 game_state.bf.curr_time,
+                                                                 game_state.bf.camera.direction,
                                                                  curr_day_time_str(game_state)),
                     glium::glutin::VirtualKeyCode::Key1 => game_state.bf.view_mode = prim::ViewMode::Normal,
                     glium::glutin::VirtualKeyCode::Key2 => game_state.bf.view_mode = prim::ViewMode::Tactical,
@@ -241,7 +241,7 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
         if reaped && i >= game_state.bf.movers.soldiers.len() {
             break;
         }
-        if ! game_state.bf.movers.soldiers[i].alive {
+        if !game_state.bf.movers.soldiers[i].alive {
             game_state.bf.movers.soldiers[i].reap_timer -= game_state.bf.frame_time as f64;
             if game_state.bf.movers.soldiers[i].reap_timer < 0.0 {
                 game_state.ai.soldier_ai.swap_remove(i);
@@ -267,6 +267,36 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
             game_state.bf.movers.soldiers[i].id = id;
             update_boarded(&mut game_state.bf.movers.boarded_map, old_id, id);
         }
+    }
+
+    let mut reaped_truck = false;
+    for i in 0..game_state.bf.movers.trucks.len() {
+        if reaped_truck && i >= game_state.bf.movers.trucks.len() {
+            break;
+        }
+        if !game_state.bf.movers.trucks[i].alive {
+            game_state.bf.movers.trucks[i].reap_timer -= game_state.bf.frame_time as f64;
+            if game_state.bf.movers.trucks[i].reap_timer < 0.0 {
+                game_state.bf.movers.trucks.swap_remove(i);
+                reaped_truck = true;
+            }
+        }
+    }
+    if reaped_truck {
+        for i in 0..game_state.bf.movers.trucks.len() {
+            let old_id = game_state.bf.movers.trucks[i].id;
+            let id = bf_info::TruckID{id: i};
+            game_state.bf.movers.trucks[i].id = id;
+            update_trucks_on_boarded(&mut game_state.bf.movers.boarded_map, old_id, id);
+        }
+    }
+}
+
+fn update_trucks_on_boarded(boarded_map: &mut bf_info::BoardedMap, old_id: bf_info::TruckID, new_id: bf_info::TruckID) -> () {
+    let prev = boarded_map.map.remove(&old_id);
+    match prev {
+        None    => (),
+        Some(i) => { boarded_map.map.insert(new_id, i); (); }
     }
 }
 

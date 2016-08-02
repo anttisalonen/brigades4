@@ -14,6 +14,8 @@ use prim;
 
 const STEP: i64 = prim::TILE_SIZE as i64;
 
+pub type Path = Vec<Vector2<i64>>;
+
 pub fn find_flag_positions(ground: &terrain::Ground, rand: &mut StdRng) -> Vec<prim::Flag> {
     let mut flag_positions = Vec::new();
     loop {
@@ -51,7 +53,7 @@ pub fn find_base_positions(ground: &terrain::Ground, rand: &mut StdRng) -> [Vect
                     Vector3::new(x1, y1, z1),
                     Vector3::new(x2, y2, z2),
         ];
-        let path = find_path(&ground, bp[0], bp[1]);
+        let path = find_path(&ground, bp[0], bp[1], "base_position", 1000);
 
         match path {
             None    => (),
@@ -68,7 +70,7 @@ pub fn vec_to_grid(v: Vector3<f64>) -> Vector2<i64> {
     Vector2::new(round(v.x), round(v.z))
 }
 
-pub fn find_path(ground: &terrain::Ground, p1: Vector3<f64>, p2: Vector3<f64>) -> Option<Vec<Vector2<i64>>> {
+pub fn find_path(ground: &terrain::Ground, p1: Vector3<f64>, p2: Vector3<f64>, user: &str, limit: usize) -> Option<Path> {
     let pn1 = vec_to_grid(p1);
     let pn2 = vec_to_grid(p2);
 
@@ -118,7 +120,7 @@ pub fn find_path(ground: &terrain::Ground, p1: Vector3<f64>, p2: Vector3<f64>) -
         dx.abs() < STEP / 2 && dy.abs() < STEP / 2
     };
 
-    let mut mp = astar(graph, distance, heuristic, goal, pn1);
+    let mut mp = astar(graph, distance, heuristic, goal, pn1, limit);
     match mp {
         None            => (),
         Some(ref mut p) => {
@@ -127,15 +129,15 @@ pub fn find_path(ground: &terrain::Ground, p1: Vector3<f64>, p2: Vector3<f64>) -
     }
 
     match mp {
-        None        => println!("No path found"),
+        None        => println!("[{}] No path found", user),
         Some(ref p) => {
-            println!("Path found with {} nodes", p.len());
+            println!("[{}] Path found with {} nodes", user, p.len());
         }
     }
     mp
 }
 
-fn astar<G, D, H, Goal, A>(graph: G, distance: D, heuristic: H, goal: Goal, start: A) -> Option<Vec<A>>
+fn astar<G, D, H, Goal, A>(graph: G, distance: D, heuristic: H, goal: Goal, start: A, limit: usize) -> Option<Vec<A>>
     where G: Fn(&A) -> Vec<A>,
           D: Fn(&A, &A) -> u64,
           Goal: Fn(&A) -> bool,
@@ -175,6 +177,10 @@ fn astar<G, D, H, Goal, A>(graph: G, distance: D, heuristic: H, goal: Goal, star
     open.push(State{cost:0, node: start});
     while !open.is_empty() {
         let current = open.pop().unwrap().node;
+        if visited.len() > limit {
+            break;
+        }
+
         if visited.contains(&current) {
             continue;
         }

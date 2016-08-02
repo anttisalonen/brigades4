@@ -121,7 +121,7 @@ fn get_ground_color_at(ground: &Ground, x: f32, y: f32) -> (f32, f32, f32) {
 
 pub fn get_water_geometry() -> geom::Geom {
     get_landscape_geometry(prim::GROUND_NUM_TILES / 4, prim::TILE_SIZE * 4.0, |_, _| 0.0,
-                           |_, _| (0.0, 0.0, 0.9))
+                           |_, _| (0.4, 0.4, 0.9))
 }
 
 fn get_height_at_i(ground: &Ground, x: i32, y: i32) -> f64 {

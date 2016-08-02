@@ -145,14 +145,14 @@ impl Battlefield {
 
         Battlefield {
             camera: Camera {
-                position:  Vector3::new(-prim::HDIM as f32,
-                                        (terrain::get_height_at(&ground, -prim::HDIM, 0.0) + 70.0) as f32,
-                                        0.0),
-                direction: Vector3::new(1.0, 0.0, 0.0),
+                position:  Vector3::new(0.0,
+                                        91000.0,
+                                        -56200.0),
+                direction: Vector3::new(0.0, -0.93, 0.3667),
                 upvec:     Vector3::new(0.0, 1.0, 0.0),
                 speed:     Vector3::new(0.0, 0.0, 0.0),
             },
-            view_mode: prim::ViewMode::Normal,
+            view_mode: prim::ViewMode::Strategic,
             mouse_look: false,
             prev_mouse_position: None,
             movers: Movers {

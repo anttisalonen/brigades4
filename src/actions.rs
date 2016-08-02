@@ -137,6 +137,7 @@ fn drive_truck(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, steering:
 
 fn disembark_truck(boarded_map: &mut bf_info::BoardedMap, sid: bf_info::SoldierID) -> () {
     let mid = bf_info::soldier_boarded(boarded_map, sid);
+    println!("Soldier {} disembarked", sid.id);
     match mid {
         None => (),
         Some((tid, role)) => {
