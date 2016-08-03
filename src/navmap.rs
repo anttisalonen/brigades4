@@ -38,9 +38,16 @@ pub fn find_flag_positions(ground: &terrain::Ground, rand: &mut StdRng) -> Vec<p
 }
 
 pub fn find_base_positions(ground: &terrain::Ground, rand: &mut StdRng) -> [Vector3<f64>; 2] {
-    loop {
-        let x1 = -prim::HDIM + prim::TILE_SIZE * 2.0;
-        let x2 =  prim::HDIM - prim::TILE_SIZE * 2.0;
+    for i in 0..200 {
+        let (x1, x2) = if i < 100 {
+            let x1 = -prim::HDIM + prim::TILE_SIZE * 2.0;
+            let x2 =  prim::HDIM - prim::TILE_SIZE * 2.0;
+            (x1, x2)
+        } else {
+            let x1 =   (rand.gen::<f64>() * 0.3) * prim::DIM - prim::HDIM + prim::TILE_SIZE * 2.0;
+            let x2 = -((rand.gen::<f64>() * 0.3) * prim::DIM - prim::HDIM + prim::TILE_SIZE * 2.0);
+            (x1, x2)
+        };
         let z1 = (rand.gen::<f64>() * 0.8 + 0.1) * prim::DIM - prim::HDIM;
         let z2 = (rand.gen::<f64>() * 0.8 + 0.1) * prim::DIM - prim::HDIM;
         let y1 = terrain::get_height_at(&ground, x1, z1);
@@ -48,18 +55,22 @@ pub fn find_base_positions(ground: &terrain::Ground, rand: &mut StdRng) -> [Vect
         if y1 < 10.0 || y2 < 10.0 {
             continue;
         }
+        if (x2 - x1) + (z2 - z1).abs() < prim::DIM * 0.5 {
+            continue;
+        }
 
         let bp = [
                     Vector3::new(x1, y1, z1),
                     Vector3::new(x2, y2, z2),
         ];
-        let path = find_path(&ground, bp[0], bp[1], "base_position", 1000);
+        let path = find_path(&ground, bp[0], bp[1], "base_position", 20000);
 
         match path {
             None    => (),
             Some(_) => return bp,
         }
     }
+    panic!("Unable to find base positions!")
 }
 
 pub fn vec_to_grid(v: Vector3<f64>) -> Vector2<i64> {
