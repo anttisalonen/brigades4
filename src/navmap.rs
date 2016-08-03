@@ -11,6 +11,7 @@ use self::rand::{Rng,StdRng};
 
 use terrain;
 use prim;
+use gameutil;
 
 const STEP: i64 = prim::TILE_SIZE as i64;
 
@@ -113,16 +114,21 @@ pub fn find_path(ground: &terrain::Ground, p1: Vector3<f64>, p2: Vector3<f64>, u
         ret
     };
 
-    let distance = |n1: &Vector2<i64>, n2: &Vector2<i64>| {
+    let calc_dist = |n1: &Vector2<i64>, n2: &Vector2<i64>| {
         let dx = n2.x - n1.x;
         let dy = n2.y - n1.y;
-        ((dx * dx + dy * dy) as f64).sqrt() as u64
+        ((dx * dx + dy * dy) as f64).sqrt() * 0.001
+    };
+
+    let distance = |n1: &Vector2<i64>, n2: &Vector2<i64>| {
+        let hgt = terrain::get_height_at(ground, n2.x as f64, n2.y as f64);
+        let risk_to_coast = 100.0 - gameutil::clamp(0.0, 100.0, hgt);
+        let mul = 1.0 + risk_to_coast * 0.1;
+        (calc_dist(n1, n2) * mul) as u64
     };
 
     let heuristic = |n1: &Vector2<i64>| {
-        let dx = pn2.x - n1.x;
-        let dy = pn2.y - n1.y;
-        (dx.abs() + dy.abs()) as u64
+        calc_dist(n1, &pn2) as u64
     };
 
     let goal = |n1: &Vector2<i64>| {
