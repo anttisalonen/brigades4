@@ -67,7 +67,7 @@ fn idle_soldier(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, prev_cur
 }
 
 fn disembark_all_from_truck(boarded_map: &mut bf_info::BoardedMap, tid: bf_info::TruckID) -> () {
-    if let Some(bds) = boarded_map.map.get_mut(&tid) {
+    if let Some(bds) = boarded_map.map.get_mut(&tid.id) {
         bds.clear();
     }
 }
@@ -143,7 +143,7 @@ fn disembark_truck(boarded_map: &mut bf_info::BoardedMap, sid: bf_info::SoldierI
             unset_boarded(boarded_map, sid);
             println!("Soldier {} disembarked", sid.id);
             if role == bf_info::BoardRole::Driver {
-                let boarded = boarded_map.map.get_mut(&tid).unwrap();
+                let boarded = boarded_map.map.get_mut(&tid.id).unwrap();
                 if boarded.len() > 0 {
                     boarded[0].role = bf_info::BoardRole::Driver;
                 }
@@ -158,7 +158,7 @@ fn set_boarded(mut mov: &mut bf_info::Movers, sid: bf_info::SoldierID, tid: bf_i
         return;
     }
 
-    match mov.boarded_map.map.get_mut(&tid) {
+    match mov.boarded_map.map.get_mut(&tid.id) {
         Some(bds) => {
             let ln = bds.len();
             let role = if ln == 0 {
@@ -176,7 +176,7 @@ fn set_boarded(mut mov: &mut bf_info::Movers, sid: bf_info::SoldierID, tid: bf_i
         },
         None => (),
     }
-    mov.boarded_map.map.insert(tid, vec![bf_info::Boarded{sid: sid, role: bf_info::BoardRole::Driver}]);
+    mov.boarded_map.map.insert(tid.id, vec![bf_info::Boarded{sid: sid, role: bf_info::BoardRole::Driver}]);
     println!("{} embarked truck {}!", sid.id, tid.id);
 }
 

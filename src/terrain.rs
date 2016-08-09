@@ -29,9 +29,10 @@ pub struct GroundParams {
     loc_y: f64,
 }
 
+#[derive(RustcDecodable, RustcEncodable)]
 pub struct Ground {
-    pub height: [[f64; prim::GROUND_NUM_TILES as usize]; prim::GROUND_NUM_TILES as usize],
-    pub forest: [[f64; prim::GROUND_NUM_TILES as usize]; prim::GROUND_NUM_TILES as usize],
+    pub height: Vec<Vec<f64>>, // [[f64; prim::GROUND_NUM_TILES as usize]; prim::GROUND_NUM_TILES as usize],
+    pub forest: Vec<Vec<f64>>, // [[f64; prim::GROUND_NUM_TILES as usize]; prim::GROUND_NUM_TILES as usize],
 }
 
 
@@ -54,8 +55,8 @@ fn build_ground<F, G>(height: F, forest: G) -> Ground
     where F: Fn(f64, f64) -> f64,
           G: Fn(f64, f64) -> f64 {
     let mut g: Ground = Ground {
-        height: [[0.0; prim::GROUND_NUM_TILES as usize]; prim::GROUND_NUM_TILES as usize],
-        forest: [[0.0; prim::GROUND_NUM_TILES as usize]; prim::GROUND_NUM_TILES as usize],
+        height: vec![vec![0.0; prim::GROUND_NUM_TILES as usize]; prim::GROUND_NUM_TILES as usize],
+        forest: vec![vec![0.0; prim::GROUND_NUM_TILES as usize]; prim::GROUND_NUM_TILES as usize],
     };
 
     for j in 0..prim::GROUND_NUM_TILES as usize {
@@ -124,7 +125,7 @@ pub fn get_water_geometry() -> geom::Geom {
                            |_, _| (0.4, 0.4, 0.9))
 }
 
-fn get_height_at_i(ground: &Ground, x: i32, y: i32) -> f64 {
+pub fn get_height_at_i(ground: &Ground, x: i32, y: i32) -> f64 {
     let ix = gameutil::clamp_i(0, prim::GROUND_NUM_TILES - 1, x) as usize;
     let iy = gameutil::clamp_i(0, prim::GROUND_NUM_TILES - 1, y) as usize;
     return ground.height[ix][iy];
@@ -160,6 +161,16 @@ macro_rules! interpolate_at {
             lam1 * nh1 + lam2 * nh2 + lam3 * nh3
         }
     };
+}
+
+pub fn discretize(i: f64) -> usize {
+    let x = (i + prim::HDIM) / prim::TILE_SIZE;
+    gameutil::clamp_i(0, prim::GROUND_NUM_TILES - 2, x as i32) as usize
+}
+
+pub fn undiscretize(i: usize) -> f64 {
+    let x = (i as f64 * prim::TILE_SIZE) - prim::HDIM;
+    gameutil::clamp(-prim::HDIM, x, prim::HDIM)
 }
 
 pub fn get_height_at(ground: &Ground, x: f64, y: f64) -> f64 {

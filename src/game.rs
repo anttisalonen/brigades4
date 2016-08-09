@@ -5,6 +5,10 @@ extern crate nalgebra as na;
 use std;
 
 use na::{Vector3, Rotation3};
+use rustc_serialize::json;
+use std::io::Write;
+use std::io::Read;
+use std::fs::File;
 
 use ai;
 use gameutil;
@@ -25,30 +29,34 @@ const MAX_SOLDIERS_PER_SIDE: i32 = 40;
 
 const MAX_TRUCKS_PER_SIDE: i32 = 8;
 
+#[derive(RustcDecodable, RustcEncodable)]
 struct AiState {
     soldier_ai: Vec<ai::SoldierAI>,
 }
 
+#[derive(RustcDecodable, RustcEncodable)]
 pub struct GameState {
-    pub display: glium::Display,
     pub bf: bf_info::Battlefield,
     ai: AiState,
 }
 
 #[derive(RustcDecodable, RustcEncodable)]
 pub struct GameParams {
-    seed: u64,
-    ground_params: terrain::GroundParams,
+    pub seed: u64,
+    pub ground_params: terrain::GroundParams,
 }
 
 impl GameState {
-    pub fn new(d: glium::Display, game_params: &GameParams) -> GameState {
+    pub fn new(game_params: &GameParams) -> Option<GameState> {
         let seed = game_params.seed;
-        let bf = bf_info::Battlefield::new(seed as usize, &game_params.ground_params);
+        let mbf = bf_info::Battlefield::new(seed as usize, &game_params.ground_params);
+        if mbf.is_none() {
+            return None;
+        }
+        let bf = mbf.unwrap();
 
         let mut gs = {
             GameState {
-                display: d,
                 bf: bf,
                 ai: AiState {
                     soldier_ai: vec![],
@@ -57,7 +65,7 @@ impl GameState {
         };
         spawn_soldiers(&mut gs, 10);
         spawn_trucks(&mut gs, 1);
-        gs
+        Some(gs)
     }
 }
 
@@ -65,7 +73,7 @@ pub fn won(game_state: &GameState) -> Option<prim::Side> {
     return game_state.bf.winner;
 }
 
-pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
+pub fn update_game_state(mut game_state: &mut GameState, display: &glium::Display, frame_time: f64) -> bool {
     if !game_state.bf.pause {
         for _ in 0..game_state.bf.time_accel {
             game_state.bf.frame_time = frame_time;
@@ -82,7 +90,7 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
                                        &game_state.bf.camera.upvec),
         &(game_state.bf.camera.speed * cam_speed(game_state.bf.view_mode) * frame_time as f32));
 
-    for ev in game_state.display.poll_events() {
+    for ev in display.poll_events() {
         match ev {
             glium::glutin::Event::Closed => return false,
             glium::glutin::Event::KeyboardInput(
@@ -106,6 +114,8 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
                     glium::glutin::VirtualKeyCode::Key1 => game_state.bf.view_mode = prim::ViewMode::Normal,
                     glium::glutin::VirtualKeyCode::Key2 => game_state.bf.view_mode = prim::ViewMode::Tactical,
                     glium::glutin::VirtualKeyCode::Key3 => game_state.bf.view_mode = prim::ViewMode::Strategic,
+                    glium::glutin::VirtualKeyCode::F2 => save_game(&game_state, "quick.json"),
+                    glium::glutin::VirtualKeyCode::F3 => *game_state = load_game("quick.json"),
                     _ => ()
                 }
             }
@@ -159,6 +169,22 @@ pub fn update_game_state(game_state: &mut GameState, frame_time: f64) -> bool {
     }
 
     return true;
+}
+
+fn save_game(gs: &GameState, filename: &str) -> () {
+    let encoded = json::encode(&gs).unwrap();
+    let mut f = File::create(filename).unwrap();
+    f.write_all(encoded.as_bytes()).unwrap();
+    println!("Game saved.");
+}
+
+pub fn load_game(filename: &str) -> GameState {
+    let mut data = String::new();
+    let mut f = File::open(filename).unwrap();
+    f.read_to_string(&mut data).unwrap();
+    let ret = json::decode(&data).unwrap();
+    println!("Game loaded.");
+    ret
 }
 
 fn get_actions(ai: &mut AiState, bf: &bf_info::Battlefield) -> Vec<ai::Action> {
@@ -232,7 +258,7 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
 
     for (tid, bds) in &game_state.bf.movers.boarded_map.map {
         for bd in bds.iter() {
-            game_state.bf.movers.soldiers[bd.sid.id].position = game_state.bf.movers.trucks[tid.id].position;
+            game_state.bf.movers.soldiers[bd.sid.id].position = game_state.bf.movers.trucks[*tid].position;
         }
     }
 
@@ -293,10 +319,10 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
 }
 
 fn update_trucks_on_boarded(boarded_map: &mut bf_info::BoardedMap, old_id: bf_info::TruckID, new_id: bf_info::TruckID) -> () {
-    let prev = boarded_map.map.remove(&old_id);
+    let prev = boarded_map.map.remove(&old_id.id);
     match prev {
         None    => (),
-        Some(i) => { boarded_map.map.insert(new_id, i); (); }
+        Some(i) => { boarded_map.map.insert(new_id.id, i); (); }
     }
 }
 

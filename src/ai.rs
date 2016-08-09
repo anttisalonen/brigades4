@@ -18,6 +18,7 @@ const REPLAN_TIME: f64       = TIME_MULTIPLIER as f64 * 3600.0; // seconds
 const FOOD_FETCH_BUFFER: f64 = TIME_MULTIPLIER as f64 * 480.0; // seconds
 
 // data structures
+#[derive(RustcDecodable, RustcEncodable)]
 pub struct SoldierAI {
     tasks: VecDeque<AiTask>,
     replan_timer: f64,
@@ -45,9 +46,9 @@ macro_rules! sort_by_distance {
 }
 
 macro_rules! find_best_path {
-    ( $ground:expr, $soldier:expr, $items:expr, $name:expr ) => {
+    ( $navmap:expr, $ground:expr, $soldier:expr, $items:expr, $name:expr ) => {
         {
-            let maybe_paths = $items.iter().map(|item| navmap::find_path($ground, $soldier.position, item.pos(), $name, 2000));
+            let maybe_paths = $items.iter().map(|item| $navmap.find_path($ground, $soldier.position, item.pos(), $name, 2000));
             let zm = maybe_paths.zip($items.iter());
             let zm = zm.filter(|&(ref p, _)| p.is_some());
             let zm = zm.map(|(p, i)| (p.unwrap(), i));
@@ -140,7 +141,7 @@ fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> VecDeque<AiTask> {
 
     if time_with_food < FOOD_FETCH_BUFFER || s.ammo < 5 {
         match st {
-            Status::Driving(_) => drive_path(navmap::find_path(&bf.ground, s.position, get_base_position(bf, s.side), "ai:driving:nearest supply", 2000), false),
+            Status::Driving(_) => drive_path(bf.navmap.find_path(&bf.ground, s.position, get_base_position(bf, s.side), "ai:driving:nearest supply", 2000), false),
             _                  => {
                 if let Some(pos) = find_nearest_supply(bf, s, 2000.0) {
                     vec![AiTask::Goto(AiGoto::new(pos))].into_iter().collect()
@@ -165,7 +166,7 @@ fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> VecDeque<AiTask> {
                     if dist < 50.0 {
                         vec![AiTask::Sleep(AiSleep::new(game_minutes(60.0)))].into_iter().collect()
                     } else {
-                        drive_path(navmap::find_path(&bf.ground, s.position, bp, "ai:arbitrate:driving:back home", 2000), false)
+                        drive_path(bf.navmap.find_path(&bf.ground, s.position, bp, "ai:arbitrate:driving:back home", 2000), false)
                     }
                 }
             },
@@ -214,7 +215,7 @@ fn path_to_tasks<F>(mpath: Option<navmap::Path>, to_task: F, stop_before_end: bo
 }
 
 fn walk_path(s: &Soldier, bf: &Battlefield, pos: Vector3<f64>, msg: &str) -> VecDeque<AiTask> {
-    let mpath = navmap::find_path(&bf.ground, s.position, pos, msg, 100);
+    let mpath = bf.navmap.find_path(&bf.ground, s.position, pos, msg, 100);
     path_to_tasks(mpath, |p| AiTask::Goto(AiGoto::new(p)), false, Some(pos))
 }
 
@@ -261,7 +262,7 @@ fn interesting_flag(sold: &Soldier, bf: &Battlefield, flag: &prim::Flag) -> bool
 }
 
 fn flag_target_position(sold: &Soldier, bf: &Battlefield) -> Option<navmap::Path> {
-    let zm = find_best_path!(&bf.ground, sold, &bf.flags, "ai:nearest flag");
+    let zm = find_best_path!(&bf.navmap, &bf.ground, sold, &bf.flags, "ai:nearest flag");
     for (path, flag) in zm {
         if interesting_flag(sold, bf, &flag) {
             return Some(path);
@@ -290,6 +291,7 @@ fn flag_lone_holder(sold: &Soldier, bf: &Battlefield, pos: &Vector3<f64>) -> boo
 
 
 // task listing
+#[derive(RustcDecodable, RustcEncodable)]
 enum AiTask {
     Goto(AiGoto),
     Board(AiBoard),
@@ -300,6 +302,7 @@ enum AiTask {
 
 // goto: if enemy is within shooting range, stop to shoot.
 // else go to given point and stay there.
+#[derive(RustcDecodable, RustcEncodable)]
 struct AiGoto {
     targetpos: Vector3<f64>,
 }
@@ -381,6 +384,7 @@ fn attack(e: SoldierID, soldier: &Soldier, bf: &Battlefield) -> Option<Action> {
 }
 
 // board: goto truck, then board it.
+#[derive(RustcDecodable, RustcEncodable)]
 struct AiBoard {
     targetpos: Vector3<f64>,
 }
@@ -415,6 +419,7 @@ impl Task for AiBoard {
 }
 
 // drive: goto given point and stay.
+#[derive(RustcDecodable, RustcEncodable)]
 struct AiDrive {
     targetpos: Vector3<f64>,
 }
@@ -465,6 +470,7 @@ fn have_enough_passengers(bf: &Battlefield, truck: &Truck) -> bool {
 }
 
 // sleep: do nothing for a while.
+#[derive(RustcDecodable, RustcEncodable)]
 struct AiSleep {
     time: f64, // seconds
 }
@@ -491,6 +497,7 @@ impl Task for AiSleep {
 }
 
 // taxi: sleep until the vehicle has stopped.
+#[derive(RustcDecodable, RustcEncodable)]
 struct AiTaxi {
     wait_time: f64,
 }

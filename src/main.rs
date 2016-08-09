@@ -6,6 +6,7 @@ extern crate time;
 extern crate image;
 extern crate noise;
 extern crate rustc_serialize;
+extern crate argparse;
 
 mod geom;
 mod cube;
@@ -153,14 +154,43 @@ struct GfxPerFrame {
 
 fn main() {
     use glium::{DisplayBuild, Surface};
-    let game_params = read_game_params("share/game_params.json");
+    let mut only_check_base_positions = false;
+    let mut load_game = "".to_string();
+    {
+        let mut ap = argparse::ArgumentParser::new();
+        ap.set_description("Brigades.");
+        ap.refer(&mut only_check_base_positions)
+            .add_option(&["-b", "--base"], argparse::StoreTrue,
+                        "Only check base positions");
+        ap.refer(&mut load_game)
+            .add_option(&["-l", "--load"], argparse::Store,
+                        "Load game");
+        ap.parse_args_or_exit();
+    }
+    let mut game_state = {
+        if !load_game.is_empty() {
+            game::load_game(&load_game)
+        } else {
+            let game_params = read_game_params("share/game_params.json");
+            let mgs = GameState::new(&game_params);
+            if mgs.is_none() {
+                println!("Unable to find base positions.");
+                return;
+            }
+            if only_check_base_positions {
+                return;
+            }
+            mgs.unwrap()
+        }
+    };
 
     let display = glium::glutin::WindowBuilder::new()
                         .with_depth_buffer(24)
                         .build_glium().unwrap();
 
     let flag_texture = load_texture("share/flag.png", &display);
-    let food_texture = load_texture("share/food.png", &display);
+    let food_texture  = load_texture("share/food.png", &display);
+    let naval_texture = load_texture("share/anchor.png", &display);
 
     let positions = glium::VertexBuffer::new(&display, &cube::VERTICES).unwrap();
     let normals = glium::VertexBuffer::new(&display, &cube::NORMALS).unwrap();
@@ -293,25 +323,23 @@ fn main() {
     let color_program = glium::Program::from_source(&display, terrain_vertex_shader_src, terrain_fragment_shader_src,
                                               None).unwrap();
 
-    let mut game_state = GameState::new(display, &game_params);
-
     let ground_geom = terrain::get_ground_geometry(&game_state.bf.ground);
-    let ground_positions = glium::VertexBuffer::new(&game_state.display, &ground_geom.vertices).unwrap();
-    let ground_normals = glium::VertexBuffer::new(&game_state.display, &ground_geom.normals).unwrap();
-    let ground_colors = glium::VertexBuffer::new(&game_state.display, &ground_geom.colors).unwrap();
-    let ground_indices = glium::IndexBuffer::new(&game_state.display, glium::index::PrimitiveType::TrianglesList,
+    let ground_positions = glium::VertexBuffer::new(&display, &ground_geom.vertices).unwrap();
+    let ground_normals = glium::VertexBuffer::new(&display, &ground_geom.normals).unwrap();
+    let ground_colors = glium::VertexBuffer::new(&display, &ground_geom.colors).unwrap();
+    let ground_indices = glium::IndexBuffer::new(&display, glium::index::PrimitiveType::TrianglesList,
                                           &ground_geom.indices).unwrap();
 
     let water_geom = terrain::get_water_geometry();
-    let water_positions = glium::VertexBuffer::new(&game_state.display, &water_geom.vertices).unwrap();
-    let water_normals = glium::VertexBuffer::new(&game_state.display, &water_geom.normals).unwrap();
-    let water_colors = glium::VertexBuffer::new(&game_state.display, &water_geom.colors).unwrap();
-    let water_indices = glium::IndexBuffer::new(&game_state.display, glium::index::PrimitiveType::TrianglesList,
+    let water_positions = glium::VertexBuffer::new(&display, &water_geom.vertices).unwrap();
+    let water_normals = glium::VertexBuffer::new(&display, &water_geom.normals).unwrap();
+    let water_colors = glium::VertexBuffer::new(&display, &water_geom.colors).unwrap();
+    let water_indices = glium::IndexBuffer::new(&display, glium::index::PrimitiveType::TrianglesList,
                                           &water_geom.indices).unwrap();
 
-    let icon_positions = glium::VertexBuffer::new(&game_state.display, &ICON_VERTICES).unwrap();
-    let icon_normals = glium::VertexBuffer::new(&game_state.display, &ICON_NORMALS).unwrap();
-    let icon_indices = glium::IndexBuffer::new(&game_state.display, glium::index::PrimitiveType::TrianglesList,
+    let icon_positions = glium::VertexBuffer::new(&display, &ICON_VERTICES).unwrap();
+    let icon_normals = glium::VertexBuffer::new(&display, &ICON_NORMALS).unwrap();
+    let icon_indices = glium::IndexBuffer::new(&display, glium::index::PrimitiveType::TrianglesList,
                                           &ICON_INDICES).unwrap();
 
     let params = glium::DrawParameters {
@@ -348,7 +376,7 @@ fn main() {
         let frame_time = (curr_time - prev_time) as f64 / 1000000000.0;
         prev_time = curr_time;
 
-        if ! game::update_game_state(&mut game_state, frame_time) {
+        if ! game::update_game_state(&mut game_state, &display, frame_time) {
             break;
         }
 
@@ -357,7 +385,7 @@ fn main() {
             break;
         }
 
-        let mut target = game_state.display.draw();
+        let mut target = display.draw();
         target.clear_color_and_depth((0.5, 0.5, 1.0, 1.0), 1.0);
         let view = view_matrix(&game_state.bf.camera.position,
                                &game_state.bf.camera.direction,
@@ -412,6 +440,13 @@ fn main() {
             draw_icon(&gfx, &mut gfx_per_frame, &supply.position,
                       game_state.bf.view_mode,
                       [1.0, 1.0, 1.0], &food_texture, &icon_params);
+        }
+
+        // naval bases
+        for naval in game_state.bf.naval_bases.iter() {
+            draw_icon(&gfx, &mut gfx_per_frame, &naval.position,
+                      game_state.bf.view_mode,
+                      [1.0, 1.0, 1.0], &naval_texture, &icon_params);
         }
 
 
