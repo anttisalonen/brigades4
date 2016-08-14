@@ -27,8 +27,6 @@ const DAY_TIME: f64            = bf_info::TIME_MULTIPLIER as f64 * 60.0 * 24.0;
 
 const MAX_SOLDIERS_PER_SIDE: i32 = 40;
 
-const MAX_TRUCKS_PER_SIDE: i32 = 8;
-
 #[derive(RustcDecodable, RustcEncodable)]
 struct AiState {
     soldier_ai: Vec<ai::SoldierAI>,
@@ -47,9 +45,9 @@ pub struct GameParams {
 }
 
 impl GameState {
-    pub fn new(game_params: &GameParams) -> Option<GameState> {
+    pub fn new(game_params: &GameParams, vehicle_params: [Vec<bf_info::VehicleInfo>; 2]) -> Option<GameState> {
         let seed = game_params.seed;
-        let mbf = bf_info::Battlefield::new(seed as usize, &game_params.ground_params);
+        let mbf = bf_info::Battlefield::new(seed as usize, &game_params.ground_params, vehicle_params);
         if mbf.is_none() {
             return None;
         }
@@ -64,7 +62,7 @@ impl GameState {
             }
         };
         spawn_soldiers(&mut gs, 10);
-        spawn_trucks(&mut gs, 1);
+        spawn_vehicles(&mut gs);
         Some(gs)
     }
 }
@@ -204,7 +202,7 @@ fn check_flags(gs: &mut GameState) -> () {
             if sold.alive {
                 let dist = gameutil::dist(&sold, &flag.position);
                 if dist < 20.0 {
-                    holding[if sold.side == prim::Side::Blue { 0 } else { 1 }] = true;
+                    holding[prim::side_to_index(sold.side)] = true;
                 }
             }
         }
@@ -254,11 +252,11 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
         actions::execute_action(&action, &mut game_state.bf, prev_curr_time);
     }
     game_state.bf.update_soldiers();
-    game_state.bf.update_trucks();
+    game_state.bf.update_vehicles();
 
     for (tid, bds) in &game_state.bf.movers.boarded_map.map {
         for bd in bds.iter() {
-            game_state.bf.movers.soldiers[bd.sid.id].position = game_state.bf.movers.trucks[*tid].position;
+            game_state.bf.movers.soldiers[bd.sid.id].position = game_state.bf.movers.vehicles[*tid].position;
         }
     }
 
@@ -295,30 +293,30 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
         }
     }
 
-    let mut reaped_truck = false;
-    for i in 0..game_state.bf.movers.trucks.len() {
-        if reaped_truck && i >= game_state.bf.movers.trucks.len() {
+    let mut reaped_vehicle = false;
+    for i in 0..game_state.bf.movers.vehicles.len() {
+        if reaped_vehicle && i >= game_state.bf.movers.vehicles.len() {
             break;
         }
-        if !game_state.bf.movers.trucks[i].alive {
-            game_state.bf.movers.trucks[i].reap_timer -= game_state.bf.frame_time as f64;
-            if game_state.bf.movers.trucks[i].reap_timer < 0.0 {
-                game_state.bf.movers.trucks.swap_remove(i);
-                reaped_truck = true;
+        if !game_state.bf.movers.vehicles[i].alive {
+            game_state.bf.movers.vehicles[i].reap_timer -= game_state.bf.frame_time as f64;
+            if game_state.bf.movers.vehicles[i].reap_timer < 0.0 {
+                game_state.bf.movers.vehicles.swap_remove(i);
+                reaped_vehicle = true;
             }
         }
     }
-    if reaped_truck {
-        for i in 0..game_state.bf.movers.trucks.len() {
-            let old_id = game_state.bf.movers.trucks[i].id;
-            let id = bf_info::TruckID{id: i};
-            game_state.bf.movers.trucks[i].id = id;
-            update_trucks_on_boarded(&mut game_state.bf.movers.boarded_map, old_id, id);
+    if reaped_vehicle {
+        for i in 0..game_state.bf.movers.vehicles.len() {
+            let old_id = game_state.bf.movers.vehicles[i].id;
+            let id = bf_info::VehicleID{id: i};
+            game_state.bf.movers.vehicles[i].id = id;
+            update_vehicles_on_boarded(&mut game_state.bf.movers.boarded_map, old_id, id);
         }
     }
 }
 
-fn update_trucks_on_boarded(boarded_map: &mut bf_info::BoardedMap, old_id: bf_info::TruckID, new_id: bf_info::TruckID) -> () {
+fn update_vehicles_on_boarded(boarded_map: &mut bf_info::BoardedMap, old_id: bf_info::VehicleID, new_id: bf_info::VehicleID) -> () {
     let prev = boarded_map.map.remove(&old_id.id);
     match prev {
         None    => (),
@@ -352,17 +350,35 @@ fn spawn_soldiers(gs: &mut GameState, num: i32) -> () {
     }
 }
 
-fn spawn_trucks(gs: &mut GameState, num: i32) -> () {
+fn spawn_vehicles(gs: &mut GameState) -> () {
     for side in [prim::Side::Blue, prim::Side::Red].iter() {
-        let num_trucks = gs.bf.movers.trucks.iter().filter(|s| s.side == *side).count() as i32;
-        let mut pos = gs.bf.base_position[if *side == prim::Side::Red { 1 } else { 0 }];
+        let num_vehicles = gs.bf.count_vehicles(*side, "truck");
+        let mut pos = gs.bf.base_position[prim::side_to_index(*side)];
         pos.x += 100.0;
-        for _ in 0..(std::cmp::min(num, MAX_TRUCKS_PER_SIDE - num_trucks)) {
+        let num_to_spawn = {
+            let vinfo = gs.bf.movers.vehicle_info.get_vehicle_info(*side, "truck").unwrap();
+            let spawn_rate = vinfo.spawn_rate;
+            let max_num = vinfo.max_num_per_side;
+            std::cmp::min(spawn_rate, max_num - num_vehicles)
+        };
+        for _ in 0..num_to_spawn {
             pos.z += 20.0;
             pos.y = terrain::get_height_at(&gs.bf.ground, pos.x, pos.z);
-            spawn_truck(pos,
-                        &mut gs.bf.movers.trucks,
-                        *side);
+            spawn_vehicle(&mut gs.bf, pos, *side, "truck");
+        }
+    }
+
+    for side in [prim::Side::Blue, prim::Side::Red].iter() {
+        let num_vehicles = gs.bf.count_vehicles(*side, "boat");
+        let pos = gs.bf.get_naval_spawn_position(*side);
+        let num_to_spawn = {
+            let vinfo = gs.bf.movers.vehicle_info.get_vehicle_info(*side, "boat").unwrap();
+            let spawn_rate = vinfo.spawn_rate;
+            let max_num = vinfo.max_num_per_side;
+            std::cmp::min(spawn_rate, max_num - num_vehicles)
+        };
+        for _ in 0..num_to_spawn {
+            spawn_vehicle(&mut gs.bf, pos, *side, "boat");
         }
     }
 }
@@ -384,18 +400,19 @@ fn spawn_soldier(pos: Vector3<f64>, soldiers: &mut Vec<bf_info::Soldier>, soldie
     soldier_ai.push(ai::SoldierAI::new());
 }
 
-fn spawn_truck(pos: Vector3<f64>, trucks: &mut Vec<bf_info::Truck>, side: prim::Side) -> () {
-    let s = bf_info::Truck {
+fn spawn_vehicle(bf: &mut bf_info::Battlefield, pos: Vector3<f64>, side: prim::Side, name: &str) -> () {
+    let s = bf_info::Vehicle {
+        info: bf.movers.vehicle_info.get_vehicle_info_id(side, name).unwrap(),
         position: pos,
         speed: 0.0,
         direction: Vector3::new(0.0, 0.0, 1.0),
         alive: true,
         side: side,
-        id: bf_info::TruckID{id: trucks.len()},
+        id: bf_info::VehicleID{id: bf.movers.vehicles.len()},
         reap_timer: 10.0,
         fuel: 40.0,
     };
-    trucks.push(s);
+    bf.movers.vehicles.push(s);
 }
 
 fn change_time_accel(time_accel: i32, incr: bool) -> i32 {
@@ -418,7 +435,7 @@ fn change_time_accel(time_accel: i32, incr: bool) -> i32 {
 fn spawn_reinforcements(mut gs: &mut GameState, prev_curr_time: f64) -> () {
     if actions::has_tick(&gs.bf, prev_curr_time, REINFORCEMENT_TIME) {
         spawn_soldiers(&mut gs, 2);
-        spawn_trucks(&mut gs, 1);
+        spawn_vehicles(&mut gs);
         bf_info::add_supplies(&mut gs.bf);
         println!("Reinforcements have arrived!");
     }

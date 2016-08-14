@@ -1,0 +1,46 @@
+[
+	[
+		{
+			"name": "truck",
+			"vehicle_type": "Land",
+			"max_speed_grass": 18.0,
+			"max_speed_forest": 2.0,
+			"max_speed_sea": 0.0,
+			"num_passengers": 8,
+			"spawn_rate": 1,
+			"max_num_per_side": 8
+		},
+		{
+			"name": "boat",
+			"vehicle_type": "Sea",
+			"max_speed_grass": 0.0,
+			"max_speed_forest": 0.0,
+			"max_speed_sea": 10.0,
+			"num_passengers": 8,
+			"spawn_rate": 1,
+			"max_num_per_side": 4
+		}
+	],
+	[
+		{
+			"name": "truck",
+			"vehicle_type": "Land",
+			"max_speed_grass": 18.0,
+			"max_speed_forest": 2.0,
+			"max_speed_sea": 0.0,
+			"num_passengers": 8,
+			"spawn_rate": 1,
+			"max_num_per_side": 8
+		},
+		{
+			"name": "boat",
+			"vehicle_type": "Sea",
+			"max_speed_grass": 0.0,
+			"max_speed_forest": 0.0,
+			"max_speed_sea": 10.0,
+			"num_passengers": 8,
+			"spawn_rate": 1,
+			"max_num_per_side": 4
+		}
+	]
+]

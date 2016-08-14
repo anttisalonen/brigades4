@@ -15,13 +15,13 @@ impl Battlefield {
         self.movers.check_drowning();
     }
 
-    pub fn update_trucks(&mut self) {
-        for ref mut truck in &mut self.movers.trucks {
-            truck.position.y = terrain::get_height_at(&self.ground, truck.position.x, truck.position.z);
-            truck.speed = truck.speed * (1.0 - 0.10 * self.frame_time);
+    pub fn update_vehicles(&mut self) {
+        for ref mut vehicle in &mut self.movers.vehicles {
+            vehicle.position.y = terrain::get_height_at(&self.ground, vehicle.position.x, vehicle.position.z);
+            vehicle.speed = vehicle.speed * (1.0 - 0.10 * self.frame_time);
         }
 
-        self.movers.check_underwater_trucks();
+        self.movers.check_underwater_vehicles();
     }
 }
 
@@ -34,10 +34,10 @@ impl Movers {
         }
     }
 
-    fn check_underwater_trucks(&mut self) {
-        for ref mut truck in &mut self.trucks {
-            if truck.position.y < DROWN_DEPTH {
-                actions::destroy_truck(&mut self.boarded_map, truck);
+    fn check_underwater_vehicles(&mut self) {
+        for ref mut vehicle in &mut self.vehicles {
+            if vehicle.position.y < DROWN_DEPTH {
+                actions::destroy_vehicle(&mut self.boarded_map, vehicle);
             }
         }
     }

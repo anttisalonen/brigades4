@@ -13,17 +13,14 @@ const SUPPLY_DISTANCE: f64     = 5.0; // distance where supply can be picked up
 const SOLDIER_MAX_FOOD: i32 = 8;
 const SOLDIER_MAX_AMMO: i32 = 40;
 
-const MAX_TRUCK_SPEED_GRASS:  f64 = 18.0;
-const MAX_TRUCK_SPEED_FOREST: f64 = 2.0;
-
 pub fn execute_action(action: &ai::Action, bf: &mut bf_info::Battlefield, prev_curr_time: f64) -> () {
     match action {
         &ai::Action::NoAction(s)            => idle_soldier(bf, s, prev_curr_time),
         &ai::Action::MoveAction(s, diff)    => move_soldier(bf, s, diff),
         &ai::Action::ShootAction(from, to)  => shoot_soldier(from, to, bf),
-        &ai::Action::BoardAction(s, tr)     => board_truck(bf, s, tr),
-        &ai::Action::DriveAction(s, st, ga) => drive_truck(bf, s, st, ga),
-        &ai::Action::DisembarkAction(s)     => disembark_truck(&mut bf.movers.boarded_map, s),
+        &ai::Action::BoardAction(s, tr)     => board_vehicle(bf, s, tr),
+        &ai::Action::DriveAction(s, st, ga) => drive_vehicle(bf, s, st, ga),
+        &ai::Action::DisembarkAction(s)     => disembark_vehicle(&mut bf.movers.boarded_map, s),
     }
 }
 
@@ -66,20 +63,20 @@ fn idle_soldier(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, prev_cur
     }
 }
 
-fn disembark_all_from_truck(boarded_map: &mut bf_info::BoardedMap, tid: bf_info::TruckID) -> () {
+fn disembark_all_from_vehicle(boarded_map: &mut bf_info::BoardedMap, tid: bf_info::VehicleID) -> () {
     if let Some(bds) = boarded_map.map.get_mut(&tid.id) {
         bds.clear();
     }
 }
 
-pub fn destroy_truck(boarded_map: &mut bf_info::BoardedMap, truck: &mut bf_info::Truck) -> () {
-    truck.alive = false;
-    disembark_all_from_truck(boarded_map, truck.id);
+pub fn destroy_vehicle(boarded_map: &mut bf_info::BoardedMap, vehicle: &mut bf_info::Vehicle) -> () {
+    vehicle.alive = false;
+    disembark_all_from_vehicle(boarded_map, vehicle.id);
 }
 
 pub fn kill_soldier(boarded_map: &mut bf_info::BoardedMap, soldier: &mut bf_info::Soldier) -> () {
     soldier.alive = false;
-    disembark_truck(boarded_map, soldier.id);
+    disembark_vehicle(boarded_map, soldier.id);
 }
 
 fn shoot_soldier(from: bf_info::SoldierID, to: bf_info::SoldierID, mut bf: &mut bf_info::Battlefield) {
@@ -105,37 +102,50 @@ fn shoot_soldier(from: bf_info::SoldierID, to: bf_info::SoldierID, mut bf: &mut 
     }
 }
 
-fn board_truck(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, tid: bf_info::TruckID) -> () {
-    if bf_info::truck_free_by_id(bf, tid) &&
-        gameutil::dist(&bf.movers.soldiers[sid.id], &bf.movers.trucks[tid.id].position) < 3.0 {
+fn board_vehicle(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, tid: bf_info::VehicleID) -> () {
+    if bf_info::vehicle_free_by_id(bf, tid) &&
+        gameutil::dist(&bf.movers.soldiers[sid.id], &bf.movers.vehicles[tid.id].position) < 3.0 {
         set_boarded(&mut bf.movers, sid, tid);
     }
 }
 
-fn drive_truck(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, steering: f64, gas: f64) -> () {
+fn drive_vehicle(bf: &mut bf_info::Battlefield, sid: bf_info::SoldierID, steering: f64, gas: f64) -> () {
     let mtid = bf_info::soldier_boarded(&bf.movers.boarded_map, sid);
     if mtid == None {
         return;
     }
+    let vid = mtid.unwrap().0;
+    let (grass_speed, forest_speed, sea_speed) = {
+        let vinfo = bf.movers.get_vehicle_info_from_vehicle_id(vid);
+        (vinfo.max_speed_grass, vinfo.max_speed_forest, vinfo.max_speed_sea)
+    };
+    let ref mut vehicle = bf.movers.vehicles[vid.id];
 
-    let ref mut truck = bf.movers.trucks[mtid.unwrap().0.id];
-
-    if !truck.alive {
+    if !vehicle.alive {
         return;
     }
 
-    truck.direction = na::rotate(
+    vehicle.direction = na::rotate(
         &Rotation3::new(Vector3::new(0.0, 0.2 * gameutil::clamp(-1.0, 1.0, steering) * bf.frame_time, 0.0)),
-        &truck.direction);
-    truck.speed += gameutil::clamp(0.0,  1.0, gas) * 2.0  * bf.frame_time;
-    truck.speed += gameutil::clamp(-1.0, 0.0, gas) * 10.0 * bf.frame_time;
-    let forest = terrain::get_forest_at(&bf.ground, truck.position.x, truck.position.z);
-    let max_speed = gameutil::mix(MAX_TRUCK_SPEED_GRASS, MAX_TRUCK_SPEED_FOREST, forest);
-    truck.speed = gameutil::clamp(0.0, max_speed, truck.speed);
-    truck.position += truck.direction * truck.speed * bf.frame_time;
+        &vehicle.direction);
+    vehicle.speed += gameutil::clamp(0.0,  1.0, gas) * 2.0  * bf.frame_time;
+    vehicle.speed += gameutil::clamp(-1.0, 0.0, gas) * 10.0 * bf.frame_time;
+    let hgt = terrain::get_height_at(&bf.ground, vehicle.position.x, vehicle.position.z);
+    let forest = terrain::get_forest_at(&bf.ground, vehicle.position.x, vehicle.position.z);
+    let max_land_speed = gameutil::mix(grass_speed, forest_speed, forest);
+    let land_speed = gameutil::clamp(0.0, max_land_speed, vehicle.speed);
+    let sea_speed = gameutil::clamp(0.0, sea_speed, vehicle.speed);
+    if hgt > -2.0 && hgt < 2.0 {
+        vehicle.speed = f64::max(land_speed, sea_speed);
+    } else if hgt >= 2.0 {
+        vehicle.speed = land_speed;
+    } else {
+        vehicle.speed = sea_speed;
+    }
+    vehicle.position += vehicle.direction * vehicle.speed * bf.frame_time;
 }
 
-fn disembark_truck(boarded_map: &mut bf_info::BoardedMap, sid: bf_info::SoldierID) -> () {
+fn disembark_vehicle(boarded_map: &mut bf_info::BoardedMap, sid: bf_info::SoldierID) -> () {
     let mid = bf_info::soldier_boarded(boarded_map, sid);
     match mid {
         None => (),
@@ -152,12 +162,13 @@ fn disembark_truck(boarded_map: &mut bf_info::BoardedMap, sid: bf_info::SoldierI
     }
 }
 
-fn set_boarded(mut mov: &mut bf_info::Movers, sid: bf_info::SoldierID, tid: bf_info::TruckID) -> () {
+fn set_boarded(mut mov: &mut bf_info::Movers, sid: bf_info::SoldierID, tid: bf_info::VehicleID) -> () {
     if bf_info::soldier_boarded(&mov.boarded_map, sid) != None {
         println!("{} tried to board but is already boarded", sid.id);
         return;
     }
 
+    let num_pass = mov.get_vehicle_info_from_vehicle_id(tid).num_passengers;
     match mov.boarded_map.map.get_mut(&tid.id) {
         Some(bds) => {
             let ln = bds.len();
@@ -166,9 +177,9 @@ fn set_boarded(mut mov: &mut bf_info::Movers, sid: bf_info::SoldierID, tid: bf_i
             } else {
                 bf_info::BoardRole::Passenger
             };
-            if ln < bf_info::TRUCK_NUM_PASSENGERS as usize + 1 {
+            if ln < num_pass as usize + 1 {
                 bds.push(bf_info::Boarded{sid: sid, role: role });
-                println!("{} embarked truck {}!", sid.id, tid.id);
+                println!("{} embarked vehicle {}!", sid.id, tid.id);
             } else {
                 println!("{} tried to board but failed", sid.id);
             }
@@ -177,7 +188,7 @@ fn set_boarded(mut mov: &mut bf_info::Movers, sid: bf_info::SoldierID, tid: bf_i
         None => (),
     }
     mov.boarded_map.map.insert(tid.id, vec![bf_info::Boarded{sid: sid, role: bf_info::BoardRole::Driver}]);
-    println!("{} embarked truck {}!", sid.id, tid.id);
+    println!("{} embarked vehicle {}!", sid.id, tid.id);
 }
 
 fn unset_boarded(mut boarded_map: &mut bf_info::BoardedMap, sid: bf_info::SoldierID) -> () {

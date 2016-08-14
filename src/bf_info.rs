@@ -3,7 +3,7 @@ extern crate rand;
 use std;
 use std::collections::HashMap;
 
-use na::Vector3;
+use na::{Vector3, Norm};
 
 use self::rand::{SeedableRng,Rng};
 
@@ -16,8 +16,6 @@ pub const EAT_TIME: f64        = TIME_MULTIPLIER as f64 * 479.0;
 
 pub const SOLDIER_SPEED: f64 = 1.3; // m/s
 
-pub const TRUCK_NUM_PASSENGERS: i32 = 8;
-
 const SUPPLY_MAX_FOOD: i32 = 800;
 const SUPPLY_MAX_AMMO: i32 = 4000;
 
@@ -29,7 +27,13 @@ pub struct SoldierID {
 
 #[derive(PartialEq, Eq, Copy, Clone, Hash)]
 #[derive(RustcDecodable, RustcEncodable)]
-pub struct TruckID {
+pub struct VehicleID {
+    pub id: usize,
+}
+
+#[derive(RustcDecodable, RustcEncodable)]
+pub struct VehicleInfoID {
+    pub side: prim::Side,
     pub id: usize,
 }
 
@@ -47,14 +51,33 @@ pub struct Soldier {
     pub eat_timer: f64,
 }
 
+#[derive(RustcDecodable, RustcEncodable, Debug)]
+pub enum VehicleType {
+    Land,
+    Sea,
+}
+
+#[derive(RustcDecodable, RustcEncodable, Debug)]
+pub struct VehicleInfo {
+    pub name: String,
+    pub vehicle_type: VehicleType,
+    pub max_speed_grass: f64,
+    pub max_speed_forest: f64,
+    pub max_speed_sea: f64,
+    pub num_passengers: i32,
+    pub spawn_rate: i32,
+    pub max_num_per_side: i32,
+}
+
 #[derive(RustcDecodable, RustcEncodable)]
-pub struct Truck {
+pub struct Vehicle {
+    pub info: VehicleInfoID,
     pub position: Vector3<f64>,
     pub speed: f64,
     pub direction: Vector3<f64>,
     pub alive: bool,
     pub side: prim::Side,
-    pub id: TruckID,
+    pub id: VehicleID,
     pub reap_timer: f64,
     pub fuel: f64,
 }
@@ -85,46 +108,6 @@ pub struct BoardedMap {
     pub map: HashMap<usize, Vec<Boarded>>,
 }
 
-/*
-use rustc_serialize::Encodable;
-use rustc_serialize::Encoder;
-use rustc_serialize::Decodable;
-use rustc_serialize::Decoder;
-
-impl Encodable for BoardedMap {
-    fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), S::Error> {
-        s.emit_map(self.map.len(), |s| {
-            for (i, e) in &self.map.iter().enumerate() {
-                let (ref k, ref v) = *e;
-                let k_enc = k.id;
-                try!(s.emit_map_elt_key(i, |s| k_enc.encode(s)));
-                try!(s.emit_map_elt_val(i, |s| v.encode(s)));
-            }
-            Ok(())
-        })
-    }
-}
-
-impl Decodable for BoardedMap {
-    fn decode<D: Decoder>(d: &mut D) -> Result<BoardedMap, D::Error> {
-        d.read_map(self.map.len(), |s| {
-            for (i, e) in &self.map.iter().enumerate() {
-                let (ref k, ref v) = *e;
-                let k_enc = k.id;
-                try!(s.emit_map_elt_key(i, |s| k_enc.encode(s)));
-                try!(s.emit_map_elt_val(i, |s| v.encode(s)));
-            }
-            Ok(())
-        })
-        d.read_struct("Point", 2, |d| {
-            let x = try!(d.read_struct_field("x", 0, |d| { d.read_i32() }));
-            let y = try!(d.read_struct_field("y", 1, |d| { d.read_i32() }));
-            Ok(Point{ x: x, y: y })
-        })
-    }
-}
-*/
-
 #[derive(RustcDecodable, RustcEncodable)]
 pub struct NavalBase {
     pub position: Vector3<f64>,
@@ -140,8 +123,14 @@ pub struct SupplyPoint {
 #[derive(RustcDecodable, RustcEncodable)]
 pub struct Movers {
     pub soldiers: Vec<Soldier>,
-    pub trucks: Vec<Truck>,
+    pub vehicles: Vec<Vehicle>,
     pub boarded_map: BoardedMap,
+    pub vehicle_info: VehicleInfoMap,
+}
+
+#[derive(RustcDecodable, RustcEncodable)]
+pub struct VehicleInfoMap {
+    vmap: [Vec<VehicleInfo>; 2],
 }
 
 #[derive(RustcDecodable, RustcEncodable)]
@@ -162,6 +151,7 @@ pub struct Battlefield {
     pub naval_bases: Vec<NavalBase>,
     pub movers: Movers,
     pub pause: bool,
+    naval_spawn_positions: [Vector3<f64>; 2],
 }
 
 pub trait Locatable {
@@ -186,7 +176,7 @@ impl Locatable for SupplyPoint {
     }
 }
 
-impl Locatable for Truck {
+impl Locatable for Vehicle {
     fn pos(&self) -> Vector3<f64> {
         self.position
     }
@@ -199,7 +189,7 @@ impl Locatable for prim::Flag {
 }
 
 impl Battlefield {
-    pub fn new(seed: usize, ground_params: &terrain::GroundParams) -> Option<Battlefield> {
+    pub fn new(seed: usize, ground_params: &terrain::GroundParams, vehicle_params: [Vec<VehicleInfo>; 2]) -> Option<Battlefield> {
         let ground = terrain::init_ground(&ground_params);
         let mut rng = rand::StdRng::from_seed(&[seed]);
 
@@ -217,6 +207,13 @@ impl Battlefield {
             }).collect(),
         };
 
+        let naval_spawn_positions = [find_naval_spawn_position(&naval_bases[0].position,
+                                                               &base_positions[0],
+                                                               &ground),
+                                     find_naval_spawn_position(&naval_bases[1].position,
+                                                               &base_positions[1],
+                                                               &ground)];
+
         Some(Battlefield {
             camera: Camera {
                 position:  Vector3::new(0.0,
@@ -231,8 +228,9 @@ impl Battlefield {
             prev_mouse_position: None,
             movers: Movers {
                 soldiers: vec![],
-                trucks: vec![],
+                vehicles: vec![],
                 boarded_map: BoardedMap{map: HashMap::new()},
+                vehicle_info: VehicleInfoMap{vmap: vehicle_params},
             },
             ground: ground,
             navmap: nv,
@@ -249,12 +247,81 @@ impl Battlefield {
             }).collect(),
             naval_bases: naval_bases,
             pause: false,
+            naval_spawn_positions: naval_spawn_positions,
         })
     }
 
     pub fn rand(&mut self) -> f64 {
         rand::thread_rng().gen::<f64>()
     }
+
+    pub fn count_vehicles(&self, side: prim::Side, name: &str) -> i32 {
+        self.movers.vehicles.iter().filter(|v| is_vehicle(v, &self.movers.vehicle_info, side, name)).count() as i32
+    }
+
+    pub fn get_naval_spawn_position(&self, side: prim::Side) -> Vector3<f64> {
+        self.naval_spawn_positions[prim::side_to_index(side)]
+    }
+
+}
+
+impl Movers {
+    pub fn get_vehicle_info_from_vehicle_id(&self, id: VehicleID) -> &VehicleInfo {
+        let ref veh = self.vehicles[id.id];
+        &self.vehicle_info.vmap[prim::side_to_index(veh.info.side)][veh.info.id]
+    }
+
+    pub fn search_profile(&self, id: VehicleID) -> navmap::SearchProfile {
+        let ref veh = self.vehicles[id.id];
+        let ref typ = self.vehicle_info.vmap[prim::side_to_index(veh.info.side)][veh.info.id].vehicle_type;
+        match *typ {
+            VehicleType::Land => navmap::SearchProfile::Land,
+            VehicleType::Sea  => navmap::SearchProfile::Sea,
+        }
+    }
+}
+
+impl VehicleInfoMap {
+    pub fn get_vehicle_info_id(&self, side: prim::Side, name: &str) -> Option<VehicleInfoID> {
+        for (i, v) in self.vmap[prim::side_to_index(side)].iter().enumerate() {
+            if v.name == name {
+                return Some(VehicleInfoID{side: side, id: i});
+            }
+        }
+        None
+    }
+
+    pub fn get_vehicle_info(&self, side: prim::Side, name: &str) -> Option<&VehicleInfo> {
+        for v in self.vmap[prim::side_to_index(side)].iter() {
+            if v.name == name {
+                return Some(v);
+            }
+        }
+        None
+    }
+
+}
+
+fn find_naval_spawn_position(naval_base: &Vector3<f64>, base_position: &Vector3<f64>, ground: &terrain::Ground) -> Vector3<f64> {
+    // walk from base to naval position until coastline found
+    let mut vec = *naval_base - *base_position;
+    vec.y = 0.0;
+    let len = vec.norm() as i64;
+    let vec = vec.normalize();
+    for i in 0..len {
+        let pos = *base_position + vec * i as f64;
+        let hgt = terrain::get_height_at(ground, pos.x, pos.z);
+        if hgt < 0.0 {
+            return Vector3::new(pos.x, 0.0, pos.z);
+        }
+    }
+    assert!(false);
+    *naval_base
+}
+
+pub fn is_vehicle(veh: &Vehicle, vmap: &VehicleInfoMap, side: prim::Side, name: &str) -> bool {
+    let ref info = vmap.vmap[prim::side_to_index(side)][veh.info.id];
+    info.name == name
 }
 
 impl SupplyPoint {
@@ -273,24 +340,24 @@ pub fn get_base_position(bf: &Battlefield, side: prim::Side) -> Vector3<f64> {
     bf.base_position[if side == prim::Side::Red { 1 } else { 0 }]
 }
 
-pub fn soldier_boarded(boarded_map: &BoardedMap, s: SoldierID) -> Option<(TruckID, BoardRole)> {
+pub fn soldier_boarded(boarded_map: &BoardedMap, s: SoldierID) -> Option<(VehicleID, BoardRole)> {
     for (tid, bds) in &boarded_map.map {
         for bd in bds {
             if bd.sid == s {
-                return Some((TruckID{id:*tid}, bd.role));
+                return Some((VehicleID{id:*tid}, bd.role));
             }
         }
     }
     return None;
 }
 
-pub fn truck_free_by_id(bf: &Battlefield, truck: TruckID) -> bool {
-    if !bf.movers.trucks[truck.id].alive {
+pub fn vehicle_free_by_id(bf: &Battlefield, vehicle: VehicleID) -> bool {
+    if !bf.movers.vehicles[vehicle.id].alive {
         return false;
     }
 
-    if let Some(ref bds) = bf.movers.boarded_map.map.get(&truck.id) {
-        if bds.len() < TRUCK_NUM_PASSENGERS as usize + 1 {
+    if let Some(ref bds) = bf.movers.boarded_map.map.get(&vehicle.id) {
+        if bds.len() < bf.movers.get_vehicle_info_from_vehicle_id(vehicle).num_passengers as usize + 1 {
             return true;
         } else {
             return false;
@@ -300,12 +367,12 @@ pub fn truck_free_by_id(bf: &Battlefield, truck: TruckID) -> bool {
     return true;
 }
 
-pub fn truck_free(bf: &Battlefield, truck: &Truck) -> bool {
-    truck_free_by_id(bf, truck.id)
+pub fn vehicle_free(bf: &Battlefield, vehicle: &Vehicle) -> bool {
+    vehicle_free_by_id(bf, vehicle.id)
 }
 
-pub fn num_passengers(bf: &Battlefield, truck: &Truck) -> i32 {
-    match bf.movers.boarded_map.map.get(&truck.id.id) {
+pub fn num_passengers(bf: &Battlefield, vehicle: &Vehicle) -> i32 {
+    match bf.movers.boarded_map.map.get(&vehicle.id.id) {
         None => 0,
         Some(b) => std::cmp::max(0, b.len() as i32 - 1),
     }
@@ -317,5 +384,4 @@ pub fn add_supplies(bf: &mut Battlefield) -> () {
         bf.supply_points[i].add_ammo(100);
     }
 }
-
 

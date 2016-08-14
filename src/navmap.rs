@@ -15,6 +15,12 @@ use gameutil;
 
 const STEP: i64 = prim::TILE_SIZE as i64;
 
+#[derive(PartialEq, Eq, Copy, Clone, Hash)]
+pub enum SearchProfile {
+    Land,
+    Sea,
+}
+
 // 1. put flags on land masses which are reachable from the
 //    largest water mass
 // 2. if all flags are on the same land mass:
@@ -282,7 +288,7 @@ impl Navmap {
             if !all_flags_on_same {
                 return Some(bp);
             } else {
-                let path = self.find_path(&ground, bp[0], bp[1], "base_position", 20000);
+                let path = self.find_path(&ground, bp[0], bp[1], "base_position", 20000, SearchProfile::Land);
 
                 match path {
                     None    => (),
@@ -321,11 +327,13 @@ impl Navmap {
         None // TODO
     }
 
-    pub fn find_path(&self, ground: &terrain::Ground, p1: Vector3<f64>, p2: Vector3<f64>, user: &str, limit: usize) -> Option<Path> {
-        let mass1 = self.cmap.get_mass(p1.x, p1.z);
-        let mass2 = self.cmap.get_mass(p2.x, p2.z);
-        if mass1 != mass2 || mass1 <= 0 {
-            return None;
+    pub fn find_path(&self, ground: &terrain::Ground, p1: Vector3<f64>, p2: Vector3<f64>, user: &str, limit: usize, prof: SearchProfile) -> Option<Path> {
+        if prof == SearchProfile::Land {
+            let mass1 = self.cmap.get_mass(p1.x, p1.z);
+            let mass2 = self.cmap.get_mass(p2.x, p2.z);
+            if mass1 != mass2 || mass1 <= 0 {
+                return None;
+            }
         }
 
         let pn1 = vec_to_grid(p1);
@@ -344,8 +352,16 @@ impl Navmap {
 
                     let pos = Vector2::new(n.x + i as i64, n.y + j as i64);
                     i += STEP;
-                    if terrain::get_height_at(ground, pos.x as f64, pos.y as f64) < 50.0 {
-                        continue;
+                    let hgt = terrain::get_height_at(ground, pos.x as f64, pos.y as f64);
+                    match prof {
+                        SearchProfile::Land => 
+                            if hgt < 50.0 {
+                                continue;
+                            },
+                        SearchProfile::Sea => 
+                            if hgt > -50.0 {
+                                continue;
+                            },
                     }
                     if pos.x <= -prim::HDIM as i64 || pos.x >= prim::HDIM as i64 ||
                        pos.y <= -prim::HDIM as i64 || pos.y >= prim::HDIM as i64 {
@@ -367,7 +383,7 @@ impl Navmap {
 
         let distance = |n1: &Vector2<i64>, n2: &Vector2<i64>| {
             let hgt = terrain::get_height_at(ground, n2.x as f64, n2.y as f64);
-            let risk_to_coast = 100.0 - gameutil::clamp(0.0, 100.0, hgt);
+            let risk_to_coast = 100.0 - gameutil::clamp(0.0, 100.0, f64::abs(hgt));
             let mul = 1.0 + risk_to_coast * 0.1;
             (calc_dist(n1, n2) * mul) as u64
         };

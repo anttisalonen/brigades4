@@ -7,6 +7,7 @@ extern crate image;
 extern crate noise;
 extern crate rustc_serialize;
 extern crate argparse;
+extern crate rand;
 
 mod geom;
 mod cube;
@@ -91,7 +92,7 @@ fn soldier_model_matrix(s: &Soldier, vm: prim::ViewMode) -> [[f32; 4]; 4] {
     ]
 }
 
-fn truck_model_matrix(t: &bf_info::Truck, vm: prim::ViewMode) -> [[f32; 4]; 4] {
+fn vehicle_model_matrix(t: &bf_info::Vehicle, vm: prim::ViewMode) -> [[f32; 4]; 4] {
     use na::{ToHomogeneous, Transpose};
 
     let rot = Rotation3::new_observer_frame(&Vector3::new(t.direction.x as f32,
@@ -171,8 +172,9 @@ fn main() {
         if !load_game.is_empty() {
             game::load_game(&load_game)
         } else {
-            let game_params = read_game_params("share/game_params.json");
-            let mgs = GameState::new(&game_params);
+            let game_params = read_json("share/game_params.json");
+            let veh_params = read_json("share/vehicles.json");
+            let mgs = GameState::new(&game_params, veh_params);
             if mgs.is_none() {
                 println!("Unable to find base positions.");
                 return;
@@ -468,10 +470,10 @@ fn main() {
                        game_state.bf.view_mode, &params);
         }
 
-        for truck in game_state.bf.movers.trucks.iter() {
-            let col = get_color(truck.alive, truck.side);
+        for vehicle in game_state.bf.movers.vehicles.iter() {
+            let col = get_color(vehicle.alive, vehicle.side);
             draw_model(&gfx, &mut gfx_per_frame, &positions, &normals, &indices,
-                       &truck_model_matrix(&truck, game_state.bf.view_mode), col,
+                       &vehicle_model_matrix(&vehicle, game_state.bf.view_mode), col,
                        game_state.bf.view_mode, &params);
         }
         gfx_per_frame.target.finish().unwrap();
@@ -587,7 +589,8 @@ fn get_color(alive: bool, side: prim::Side) -> [f32; 3] {
     }
 }
 
-fn read_game_params(path: &str) -> game::GameParams {
+fn read_json<T>(path: &str) -> T
+    where T: rustc_serialize::Decodable {
     let mut data = String::new();
     let mut f = File::open(path).unwrap();
     f.read_to_string(&mut data).unwrap();

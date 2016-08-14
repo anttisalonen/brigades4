@@ -37,4 +37,6 @@ pub enum Side {
     Red,
 }
 
-
+pub fn side_to_index(side: Side) -> usize {
+    if side == Side::Blue { 0 } else { 1 }
+}
