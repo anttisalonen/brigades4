@@ -402,6 +402,7 @@ impl Navmap {
         match mp {
             None            => (),
             Some(ref mut p) => {
+                p.remove(0); // remove start node
                 p.push(Vector2::new(p2.x as i64, p2.z as i64));
             }
         }

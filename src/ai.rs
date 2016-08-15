@@ -12,12 +12,26 @@ use bf_info::*;
 use gameutil;
 use prim;
 use navmap;
+use actions;
 
 const SHOOT_DISTANCE: f64 = 100.0;
 const REPLAN_TIME: f64       = TIME_MULTIPLIER as f64 * 3600.0; // seconds
 const FOOD_FETCH_BUFFER: f64 = TIME_MULTIPLIER as f64 * 480.0; // seconds
 
 // data structures
+#[derive(RustcDecodable, RustcEncodable)]
+pub struct SideAI {
+    side: prim::Side,
+}
+
+impl SideAI {
+    pub fn new(side: prim::Side) -> SideAI {
+        SideAI {
+            side: side,
+        }
+    }
+}
+
 #[derive(RustcDecodable, RustcEncodable)]
 pub struct SoldierAI {
     tasks: VecDeque<AiTask>,
@@ -85,7 +99,7 @@ impl SoldierAI {
     }
 }
 
-pub fn soldier_ai_update(sai: &mut SoldierAI, soldier: &Soldier, bf: &Battlefield) -> Action {
+pub fn soldier_ai_update(sideai: &mut SideAI, sai: &mut SoldierAI, soldier: &Soldier, bf: &Battlefield) -> Action {
     sai.replan_timer -= bf.frame_time;
     if sai.replan_timer <= 0.0 {
         sai.replan_timer += REPLAN_TIME * 0.5 + REPLAN_TIME * (rand::random::<f64>());
@@ -143,7 +157,8 @@ fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> VecDeque<AiTask> {
         match st {
             Status::Driving(tid) => {
                 let prof = bf.movers.search_profile(tid);
-                drive_path(bf.navmap.find_path(&bf.ground, s.position, get_base_position(bf, s.side), "ai:driving:nearest supply", 2000, prof), false)
+                // TODO: won't work for boats
+                drive_path(bf.navmap.find_path(&bf.ground, s.position, get_base_or_naval_position(bf, s.side, tid), "ai:driving:nearest supply", 2000, prof), false)
             },
             _                  => {
                 if let Some(pos) = find_nearest_supply(bf, s, 2000.0) {
@@ -165,7 +180,7 @@ fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> VecDeque<AiTask> {
                     drive_path(flag_target_position(s, bf, prof), true)
                 } else {
                     // back home
-                    let bp = get_base_position(bf, s.side);
+                    let bp = get_base_or_naval_position(bf, s.side, tid);
                     let dist = gameutil::dist(s, &bp);
                     if dist < 50.0 {
                         vec![AiTask::Sleep(AiSleep::new(game_minutes(60.0)))].into_iter().collect()
@@ -180,7 +195,7 @@ fn ai_arbitrate_task(s: &Soldier, bf: &Battlefield) -> VecDeque<AiTask> {
                 match walk_dist {
                     Some(pos) => vec![AiTask::Goto(AiGoto::new(pos))].into_iter().collect(),
                     None      => {
-                        if let Some(vehicle) = free_vehicle_nearby(s, bf) {
+                        if let Some(vehicle) = free_vehicle_nearby(s, bf, 5000.0) {
                             vec![AiTask::Board(AiBoard::new(vehicle.0))].into_iter().collect()
                         } else if let Some(pos) = flag_nearby(s, bf, 30000.0) {
                             walk_path(s, bf, pos, "ai:walking:nearest flag")
@@ -228,10 +243,10 @@ fn drive_path(mpath: Option<navmap::Path>, stop_before_end: bool) -> VecDeque<Ai
 }
 
 // generic helpers
-fn free_vehicle_nearby(s: &Soldier, bf: &Battlefield) -> Option<(Vector3<f64>, VehicleID)> {
+fn free_vehicle_nearby(s: &Soldier, bf: &Battlefield, max_dist: f64) -> Option<(Vector3<f64>, VehicleID)> {
     let zm = sort_by_distance!(s, &bf.movers.vehicles);
     for (dist, vehicle) in zm {
-        if dist > 5000.0 {
+        if dist > max_dist {
             return None;
         }
         if !vehicle_free(bf, &vehicle) {
@@ -409,8 +424,8 @@ impl Task for AiBoard {
         if st != Status::OnFoot {
             None
         } else {
-            if gameutil::dist(soldier, &self.targetpos) < 3.0 {
-                if let Some(vehicle) = free_vehicle_nearby(soldier, bf) {
+            if gameutil::dist(soldier, &self.targetpos) < actions::MAX_BOARD_DISTANCE {
+                if let Some(vehicle) = free_vehicle_nearby(soldier, bf, actions::MAX_BOARD_DISTANCE) {
                     Some(Action::BoardAction(soldier.id, vehicle.1))
                 } else {
                     None

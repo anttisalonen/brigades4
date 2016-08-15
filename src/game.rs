@@ -30,6 +30,7 @@ const MAX_SOLDIERS_PER_SIDE: i32 = 40;
 #[derive(RustcDecodable, RustcEncodable)]
 struct AiState {
     soldier_ai: Vec<ai::SoldierAI>,
+    side_ai: [ai::SideAI; 2],
 }
 
 #[derive(RustcDecodable, RustcEncodable)]
@@ -58,6 +59,7 @@ impl GameState {
                 bf: bf,
                 ai: AiState {
                     soldier_ai: vec![],
+                    side_ai: [ai::SideAI::new(prim::Side::Blue), ai::SideAI::new(prim::Side::Red)],
                 }
             }
         };
@@ -189,7 +191,8 @@ fn get_actions(ai: &mut AiState, bf: &bf_info::Battlefield) -> Vec<ai::Action> {
     let mut ret = Vec::new();
     for i in 0..bf.movers.soldiers.len() {
         if bf.movers.soldiers[i].alive {
-            ret.push(ai::soldier_ai_update(&mut ai.soldier_ai[i], &bf.movers.soldiers[i], &bf));
+            let ind = prim::side_to_index(bf.movers.soldiers[i].side);
+            ret.push(ai::soldier_ai_update(&mut ai.side_ai[ind], &mut ai.soldier_ai[i], &bf.movers.soldiers[i], &bf));
         }
     }
     return ret;
@@ -251,8 +254,8 @@ fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
     for action in actions {
         actions::execute_action(&action, &mut game_state.bf, prev_curr_time);
     }
-    game_state.bf.update_soldiers();
     game_state.bf.update_vehicles();
+    game_state.bf.update_soldiers();
 
     for (tid, bds) in &game_state.bf.movers.boarded_map.map {
         for bd in bds.iter() {

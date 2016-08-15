@@ -13,6 +13,8 @@ const SUPPLY_DISTANCE: f64     = 5.0; // distance where supply can be picked up
 const SOLDIER_MAX_FOOD: i32 = 8;
 const SOLDIER_MAX_AMMO: i32 = 40;
 
+pub const MAX_BOARD_DISTANCE: f64 = 3.0;
+
 pub fn execute_action(action: &ai::Action, bf: &mut bf_info::Battlefield, prev_curr_time: f64) -> () {
     match action {
         &ai::Action::NoAction(s)            => idle_soldier(bf, s, prev_curr_time),

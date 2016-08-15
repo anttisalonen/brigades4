@@ -52,6 +52,7 @@ pub struct Soldier {
 }
 
 #[derive(RustcDecodable, RustcEncodable, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone)]
 pub enum VehicleType {
     Land,
     Sea,
@@ -271,10 +272,13 @@ impl Movers {
         &self.vehicle_info.vmap[prim::side_to_index(veh.info.side)][veh.info.id]
     }
 
-    pub fn search_profile(&self, id: VehicleID) -> navmap::SearchProfile {
+    pub fn vehicle_type(&self, id: VehicleID) -> VehicleType {
         let ref veh = self.vehicles[id.id];
-        let ref typ = self.vehicle_info.vmap[prim::side_to_index(veh.info.side)][veh.info.id].vehicle_type;
-        match *typ {
+        self.vehicle_info.vmap[prim::side_to_index(veh.info.side)][veh.info.id].vehicle_type
+    }
+
+    pub fn search_profile(&self, id: VehicleID) -> navmap::SearchProfile {
+        match self.vehicle_type(id) {
             VehicleType::Land => navmap::SearchProfile::Land,
             VehicleType::Sea  => navmap::SearchProfile::Sea,
         }
@@ -336,8 +340,19 @@ impl SupplyPoint {
     }
 }
 
+pub fn get_base_or_naval_position(bf: &Battlefield, side: prim::Side, id: VehicleID) -> Vector3<f64> {
+    match bf.movers.vehicle_type(id) {
+        VehicleType::Land => get_base_position(bf, side),
+        VehicleType::Sea  => get_naval_position(bf, side),
+    }
+}
+
+pub fn get_naval_position(bf: &Battlefield, side: prim::Side) -> Vector3<f64> {
+    bf.naval_bases[prim::side_to_index(side)].position
+}
+
 pub fn get_base_position(bf: &Battlefield, side: prim::Side) -> Vector3<f64> {
-    bf.base_position[if side == prim::Side::Red { 1 } else { 0 }]
+    bf.base_position[prim::side_to_index(side)]
 }
 
 pub fn soldier_boarded(boarded_map: &BoardedMap, s: SoldierID) -> Option<(VehicleID, BoardRole)> {
