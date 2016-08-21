@@ -9,9 +9,16 @@ extern crate rustc_serialize;
 extern crate argparse;
 extern crate rand;
 
+#[macro_use]
+mod ai_prim;
+
 mod geom;
 mod cube;
 mod ai;
+mod ai_tree;
+mod ai_task;
+mod ai_dec;
+mod ai_act;
 mod game;
 mod gameutil;
 mod prim;
@@ -20,11 +27,6 @@ mod bf_info;
 mod terrain;
 mod actions;
 mod navmap;
-
-use std::fs::File;
-use std::io::Read;
-
-use rustc_serialize::json;
 
 use na::{Vector3, Norm, Rotation3, Matrix4};
 use game::{GameState};
@@ -172,8 +174,8 @@ fn main() {
         if !load_game.is_empty() {
             game::load_game(&load_game)
         } else {
-            let game_params = read_json("share/game_params.json");
-            let veh_params = read_json("share/vehicles.json");
+            let game_params = gameutil::read_json("share/game_params.json");
+            let veh_params = gameutil::read_json("share/vehicles.json");
             let mgs = GameState::new(&game_params, veh_params);
             if mgs.is_none() {
                 println!("Unable to find base positions.");
@@ -185,6 +187,8 @@ fn main() {
             mgs.unwrap()
         }
     };
+
+    let aicfg = ai_tree::AiConfig::new("share/ai.json");
 
     let display = glium::glutin::WindowBuilder::new()
                         .with_depth_buffer(24)
@@ -378,7 +382,7 @@ fn main() {
         let frame_time = (curr_time - prev_time) as f64 / 1000000000.0;
         prev_time = curr_time;
 
-        if ! game::update_game_state(&mut game_state, &display, frame_time) {
+        if ! game::update_game_state(&mut game_state, &display, &aicfg, frame_time) {
             break;
         }
 
@@ -587,12 +591,4 @@ fn get_color(alive: bool, side: prim::Side) -> [f32; 3] {
     } else {
         [0.0, 0.0, 0.0f32]
     }
-}
-
-fn read_json<T>(path: &str) -> T
-    where T: rustc_serialize::Decodable {
-    let mut data = String::new();
-    let mut f = File::open(path).unwrap();
-    f.read_to_string(&mut data).unwrap();
-    json::decode(&data).unwrap()
 }

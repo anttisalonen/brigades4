@@ -1,0 +1,101 @@
+{
+   "func" : "need_food",
+   "no" : {
+      "variant": "DecisionSer",
+      "fields": [{
+	      "func": "am_driving",
+	      "yes": {
+		      "variant": "DecisionSer",
+		      "fields": [{
+			      "func": "have_enough_passengers",
+			      "yes": {
+				      "variant": "ActionSer",
+				      "fields": [
+					      "drive_to_flag"
+				      ]
+			      },
+			      "no": {
+				      "variant": "ActionSer",
+				      "fields": [
+					      "drive_to_base"
+				      ]
+			      }
+		      }]
+	      },
+	      "no": {
+		      "variant": "DecisionSer",
+		      "fields": [{
+			      "func": "am_boarded",
+			      "yes": {
+				      "variant": "ActionSer",
+				      "fields": [
+					      "get_driven_to_destination"
+				      ]
+			      },
+			      "no": {
+				      "variant": "DecisionSer",
+				      "fields": [{
+					      "func": "flag_within_walking_distance",
+					      "yes": {
+						      "variant": "ActionSer",
+						      "fields": [
+							      "walk_to_nearest_flag"
+						      ]
+					      },
+					      "no": {
+						      "variant": "DecisionSer",
+						      "fields": [{
+							      "func": "vehicle_within_walking_distance",
+							      "yes": {
+								      "variant": "ActionSer",
+								      "fields": [
+									      "board_nearby_vehicle"
+								      ]
+							      },
+							      "no": {
+								      "variant": "DecisionSer",
+								      "fields": [{
+									      "func": "flag_within_days_march",
+									      "yes": {
+										      "variant": "ActionSer",
+										      "fields": [
+											      "walk_to_nearest_flag"
+										      ]
+									      },
+									      "no": {
+										      "variant": "ActionSer",
+										      "fields": [
+											      "rest"
+										      ]
+									      }
+								      }]
+							      }
+						      }]
+					      }
+				      }]
+			      }
+		      }]
+	      }
+      }]
+   },
+   "yes" : {
+      "fields" : [
+         {
+            "func" : "am_driving",
+            "yes" : {
+               "fields" : [
+                  "drive_to_food"
+               ],
+               "variant" : "ActionSer"
+            },
+            "no" : {
+               "variant" : "ActionSer",
+               "fields" : [
+                  "walk_to_supply"
+               ]
+            }
+         }
+      ],
+      "variant" : "DecisionSer"
+   }
+}

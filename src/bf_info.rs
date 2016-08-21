@@ -400,3 +400,13 @@ pub fn add_supplies(bf: &mut Battlefield) -> () {
     }
 }
 
+pub enum Action {
+    NoAction(SoldierID),
+    MoveAction(SoldierID, Vector3<f64>),
+    ShootAction(SoldierID, SoldierID),
+    BoardAction(SoldierID, VehicleID),
+    DriveAction(SoldierID, f64, f64),
+    DisembarkAction(SoldierID),
+}
+
+

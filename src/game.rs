@@ -6,11 +6,12 @@ use std;
 
 use na::{Vector3, Rotation3};
 use rustc_serialize::json;
-use std::io::Write;
-use std::io::Read;
 use std::fs::File;
+use std::io::Write;
 
 use ai;
+use ai_task;
+use ai_tree;
 use gameutil;
 use prim;
 use bf_info;
@@ -29,8 +30,8 @@ const MAX_SOLDIERS_PER_SIDE: i32 = 40;
 
 #[derive(RustcDecodable, RustcEncodable)]
 struct AiState {
-    soldier_ai: Vec<ai::SoldierAI>,
-    side_ai: [ai::SideAI; 2],
+    soldier_ai: Vec<ai_task::SoldierAI>,
+    side_ai: [ai_task::SideAI; 2],
 }
 
 #[derive(RustcDecodable, RustcEncodable)]
@@ -59,7 +60,7 @@ impl GameState {
                 bf: bf,
                 ai: AiState {
                     soldier_ai: vec![],
-                    side_ai: [ai::SideAI::new(prim::Side::Blue), ai::SideAI::new(prim::Side::Red)],
+                    side_ai: [ai_task::SideAI::new(prim::Side::Blue), ai_task::SideAI::new(prim::Side::Red)],
                 }
             }
         };
@@ -73,14 +74,14 @@ pub fn won(game_state: &GameState) -> Option<prim::Side> {
     return game_state.bf.winner;
 }
 
-pub fn update_game_state(mut game_state: &mut GameState, display: &glium::Display, frame_time: f64) -> bool {
+pub fn update_game_state(mut game_state: &mut GameState, display: &glium::Display, aicfg: &ai_tree::AiConfig, frame_time: f64) -> bool {
     if !game_state.bf.pause {
         for _ in 0..game_state.bf.time_accel {
             game_state.bf.frame_time = frame_time;
             let prev_curr_time = game_state.bf.curr_time;
             game_state.bf.curr_time += frame_time;
             spawn_reinforcements(game_state, prev_curr_time);
-            update_soldiers(game_state, prev_curr_time);
+            update_soldiers(game_state, prev_curr_time, aicfg);
             check_winner(game_state);
         }
     }
@@ -179,20 +180,17 @@ fn save_game(gs: &GameState, filename: &str) -> () {
 }
 
 pub fn load_game(filename: &str) -> GameState {
-    let mut data = String::new();
-    let mut f = File::open(filename).unwrap();
-    f.read_to_string(&mut data).unwrap();
-    let ret = json::decode(&data).unwrap();
+    let ret = gameutil::read_json(filename);
     println!("Game loaded.");
     ret
 }
 
-fn get_actions(ai: &mut AiState, bf: &bf_info::Battlefield) -> Vec<ai::Action> {
+fn get_actions(ai: &mut AiState, bf: &bf_info::Battlefield, aicfg: &ai_tree::AiConfig) -> Vec<bf_info::Action> {
     let mut ret = Vec::new();
     for i in 0..bf.movers.soldiers.len() {
         if bf.movers.soldiers[i].alive {
             let ind = prim::side_to_index(bf.movers.soldiers[i].side);
-            ret.push(ai::soldier_ai_update(&mut ai.side_ai[ind], &mut ai.soldier_ai[i], &bf.movers.soldiers[i], &bf));
+            ret.push(ai::soldier_ai_update(aicfg, &mut ai.side_ai[ind], &mut ai.soldier_ai[i], &bf.movers.soldiers[i], &bf));
         }
     }
     return ret;
@@ -249,8 +247,8 @@ fn check_winner(game_state: &mut GameState) -> () {
     }
 }
 
-fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64) -> () {
-    let actions = get_actions(&mut game_state.ai, &game_state.bf);
+fn update_soldiers(mut game_state: &mut GameState, prev_curr_time: f64, aicfg: &ai_tree::AiConfig) -> () {
+    let actions = get_actions(&mut game_state.ai, &game_state.bf, aicfg);
     for action in actions {
         actions::execute_action(&action, &mut game_state.bf, prev_curr_time);
     }
@@ -386,7 +384,7 @@ fn spawn_vehicles(gs: &mut GameState) -> () {
     }
 }
 
-fn spawn_soldier(pos: Vector3<f64>, soldiers: &mut Vec<bf_info::Soldier>, soldier_ai: &mut Vec<ai::SoldierAI>, side: prim::Side) -> () {
+fn spawn_soldier(pos: Vector3<f64>, soldiers: &mut Vec<bf_info::Soldier>, soldier_ai: &mut Vec<ai_task::SoldierAI>, side: prim::Side) -> () {
     let s = bf_info::Soldier {
         position: pos,
         direction: 0.0,
@@ -400,7 +398,7 @@ fn spawn_soldier(pos: Vector3<f64>, soldiers: &mut Vec<bf_info::Soldier>, soldie
         eat_timer: bf_info::EAT_TIME,
     };
     soldiers.push(s);
-    soldier_ai.push(ai::SoldierAI::new());
+    soldier_ai.push(ai_task::SoldierAI::new());
 }
 
 fn spawn_vehicle(bf: &mut bf_info::Battlefield, pos: Vector3<f64>, side: prim::Side, name: &str) -> () {

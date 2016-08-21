@@ -2,7 +2,6 @@ extern crate nalgebra as na;
 
 use na::{Vector3, Rotation3};
 
-use ai;
 use gameutil;
 use bf_info;
 use terrain;
@@ -15,14 +14,14 @@ const SOLDIER_MAX_AMMO: i32 = 40;
 
 pub const MAX_BOARD_DISTANCE: f64 = 3.0;
 
-pub fn execute_action(action: &ai::Action, bf: &mut bf_info::Battlefield, prev_curr_time: f64) -> () {
+pub fn execute_action(action: &bf_info::Action, bf: &mut bf_info::Battlefield, prev_curr_time: f64) -> () {
     match action {
-        &ai::Action::NoAction(s)            => idle_soldier(bf, s, prev_curr_time),
-        &ai::Action::MoveAction(s, diff)    => move_soldier(bf, s, diff),
-        &ai::Action::ShootAction(from, to)  => shoot_soldier(from, to, bf),
-        &ai::Action::BoardAction(s, tr)     => board_vehicle(bf, s, tr),
-        &ai::Action::DriveAction(s, st, ga) => drive_vehicle(bf, s, st, ga),
-        &ai::Action::DisembarkAction(s)     => disembark_vehicle(&mut bf.movers.boarded_map, s),
+        &bf_info::Action::NoAction(s)            => idle_soldier(bf, s, prev_curr_time),
+        &bf_info::Action::MoveAction(s, diff)    => move_soldier(bf, s, diff),
+        &bf_info::Action::ShootAction(from, to)  => shoot_soldier(from, to, bf),
+        &bf_info::Action::BoardAction(s, tr)     => board_vehicle(bf, s, tr),
+        &bf_info::Action::DriveAction(s, st, ga) => drive_vehicle(bf, s, st, ga),
+        &bf_info::Action::DisembarkAction(s)     => disembark_vehicle(&mut bf.movers.boarded_map, s),
     }
 }
 

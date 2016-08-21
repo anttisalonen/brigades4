@@ -1,6 +1,13 @@
+extern crate rustc_serialize;
+
 use std;
 
+use std::fs::File;
+use std::io::Read;
+
+use rustc_serialize::json;
 use na::{Vector3, Norm, BaseFloat};
+
 use bf_info::{Soldier};
 
 pub fn to_vec_on_map(s1: &Soldier, tgt: &Vector3<f64>) -> Vector3<f64> {
@@ -44,4 +51,10 @@ pub fn mix(x: f64, y: f64, a: f64) -> f64 {
     x * (1.0 - a) + y * a
 }
 
-
+pub fn read_json<T>(path: &str) -> T
+    where T: rustc_serialize::Decodable {
+    let mut data = String::new();
+    let mut f = File::open(path).unwrap();
+    f.read_to_string(&mut data).unwrap();
+    json::decode(&data).unwrap()
+}
