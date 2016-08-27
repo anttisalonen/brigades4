@@ -27,6 +27,7 @@ mod bf_info;
 mod terrain;
 mod actions;
 mod navmap;
+mod contmap;
 
 use na::{Vector3, Norm, Rotation3, Matrix4};
 use game::{GameState};

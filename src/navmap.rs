@@ -12,6 +12,7 @@ use self::rand::{Rng,StdRng};
 use terrain;
 use prim;
 use gameutil;
+use contmap::*;
 
 const STEP: i64 = prim::TILE_SIZE as i64;
 
@@ -21,152 +22,14 @@ pub enum SearchProfile {
     Sea,
 }
 
-// 1. put flags on land masses which are reachable from the
-//    largest water mass
-// 2. if all flags are on the same land mass:
-//      try to put the bases on the same land mass
-//      no naval bases needed
-//    else:
-//      find coastline on largest water mass and land mass
-//      that has at least one flag on it
-//      put bases and naval bases near that coast
-
-#[derive(RustcDecodable, RustcEncodable)]
-struct ContinentMap {
-    mass: Vec<Vec<i32>>,
-    neighbors: HashMap<i32, Vec<(usize, usize)>>,
-    sizes: HashMap<i32, i32>,
-    reachable_from: HashMap<i32, Vec<i32>>,
-    largest_water: i32,
-}
-
-pub struct NavConfig {
-    pub flags: Vec<prim::Flag>,
-    pub base_positions: Option<[Vector3<f64>; 2]>,
-    pub naval_positions: Option<[Vector3<f64>; 2]>,
-}
-
 #[derive(RustcDecodable, RustcEncodable)]
 pub struct Navmap {
     cmap: ContinentMap,
 }
 
-impl ContinentMap {
-    fn get_mass_i(&self, i: usize, j: usize) -> i32 {
-        let r = self.mass[i][j];
-        assert!(r != 0);
-        r
-    }
-
-    fn get_mass(&self, i: f64, j: f64) -> i32 {
-        let x = terrain::discretize(i);
-        let y = terrain::discretize(j);
-        self.get_mass_i(x, y)
-    }
-
-    fn fill<F>(&mut self, a: usize, b: usize, id: i32, check: F) -> ()
-        where F: Fn(usize, usize) -> bool {
-        let mut x = a;
-        let mut y = b;
-        let mut next = Vec::new();
-        loop {
-            self.mass[x][y] = id;
-            let counter = self.sizes.entry(id).or_insert(0);
-            *counter += 1;
-            if x > 0                                   && check(x - 1, y) && self.mass[x - 1][y] == 0 {
-                next.push((x - 1, y));
-            }
-            if x < prim::GROUND_NUM_TILES as usize - 1 && check(x + 1, y) && self.mass[x + 1][y] == 0 {
-                next.push((x + 1, y));
-            }
-            if y > 0                                   && check(x, y - 1) && self.mass[x][y - 1] == 0 {
-                next.push((x, y - 1));
-            }
-            if y < prim::GROUND_NUM_TILES as usize - 1 && check(x, y + 1) && self.mass[x][y + 1] == 0 {
-                next.push((x, y + 1));
-            }
-            let mnext = next.pop();
-            match mnext {
-                None         => return,
-                Some((i, j)) => { x = i; y = j; }
-            }
-        }
-    }
-
-    fn set_up_mass(&mut self, ground: &terrain::Ground) -> () {
-        let mut next_land = 1;
-        let mut next_sea  = -1;
-        for j in 0..prim::GROUND_NUM_TILES as usize {
-            for i in 0..prim::GROUND_NUM_TILES as usize {
-                if self.mass[i][j] == 0 {
-                    let h = terrain::get_height_at_i(&ground, i as i32, j as i32);
-                    if h > 0.0 {
-                        self.fill(i, j, next_land, |x, y| terrain::get_height_at_i(&ground, x as i32, y as i32) > 0.0);
-                        next_land += 1;
-                    } else {
-                        self.fill(i, j, next_sea, |x, y| terrain::get_height_at_i(&ground, x as i32, y as i32) <= 0.0);
-                        next_sea -= 1;
-                    }
-                }
-            }
-        }
-    }
-
-    fn find_neighbors(&mut self) -> () {
-        for j in 1..(prim::GROUND_NUM_TILES - 1) as usize {
-            for i in 1..(prim::GROUND_NUM_TILES - 1) as usize {
-                let this = self.mass[i][j];
-                assert!(this != 0);
-                let tests = [self.mass[i][j + 1], self.mass[i][j - 1], self.mass[i - 1][j], self.mass[i + 1][j]];
-                for t in tests.iter() {
-                    assert!(*t != 0);
-                    if this != *t {
-                        {
-                            let vn = self.neighbors.entry(*t).or_insert(vec![]);
-                            (*vn).push((i, j));
-                        }
-                        {
-                            let vn = self.reachable_from.entry(*t).or_insert(vec![]);
-                            (*vn).push(this);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 impl Navmap {
     pub fn new(ground: &terrain::Ground) -> Navmap {
-        let mut cm: ContinentMap = ContinentMap {
-            mass: vec![vec![0; prim::GROUND_NUM_TILES as usize]; prim::GROUND_NUM_TILES as usize],
-            neighbors: HashMap::new(),
-            sizes: HashMap::new(),
-            reachable_from: HashMap::new(),
-            largest_water: 0,
-        };
-
-        cm.set_up_mass(&ground);
-        cm.find_neighbors();
-        let mut largest_land = 0;
-        let mut largest_land_size = 0;
-        for (&id, &size) in &cm.sizes {
-            if id > 0 && size > largest_land_size {
-                largest_land_size = size;
-                largest_land = id;
-            }
-        }
-        println!("Largest land is {} with size {}", largest_land, largest_land_size);
-        let mut largest_water = 0;
-        let mut largest_water_size = 0;
-        for (&id, &size) in &cm.sizes {
-            if id < 0 && size > largest_water_size {
-                largest_water_size = size;
-                largest_water = id;
-            }
-        }
-        cm.largest_water = largest_water;
-        println!("Largest water is {} with size {}", largest_water, largest_water_size);
+        let cm = ContinentMap::new(&ground);
 
         Navmap {
             cmap: cm,
@@ -177,7 +40,7 @@ impl Navmap {
         let flags = self.find_flag_positions(ground, rand);
 
         assert!(flags.len() > 0);
-        let flags_mass: Vec<i32> = flags.iter().map(|ref f| self.cmap.get_mass(f.position.x, f.position.z)).collect();
+        let flags_mass: Vec<MassID> = flags.iter().map(|ref f| self.cmap.get_mass(f.position.x, f.position.z)).collect();
         let all_flags_on_same = flags_mass.iter().all(|&m| m == flags_mass[0]);
 
         let bases = self.find_base_positions(ground, all_flags_on_same, flags_mass, rand);
@@ -204,8 +67,8 @@ impl Navmap {
             let yp = terrain::get_height_at(&ground, xp, zp);
             if yp > 10.0 {
                 let this_mass = self.cmap.get_mass(xp, zp);
-                if this_mass > 0 {
-                    let mreachable = self.cmap.reachable_from.get(&this_mass);
+                if this_mass.is_land() {
+                    let mreachable = self.cmap.get_reachables(this_mass);
                     match mreachable {
                         None    => (),
                         Some(r) => {
@@ -228,9 +91,9 @@ impl Navmap {
         }).collect()
     }
 
-    fn find_base_positions(&self, ground: &terrain::Ground, all_flags_on_same: bool, flags_mass: Vec<i32>, rand: &mut StdRng) -> Option<[Vector3<f64>; 2]> {
+    fn find_base_positions(&self, ground: &terrain::Ground, all_flags_on_same: bool, flags_mass: Vec<MassID>, rand: &mut StdRng) -> Option<[Vector3<f64>; 2]> {
         if !all_flags_on_same {
-            if self.cmap.neighbors.get(&self.cmap.largest_water).unwrap_or(&vec![]).len() == 0 {
+            if self.cmap.get_neighbors(self.cmap.largest_water).unwrap_or(&vec![]).len() == 0 {
                 return None;
             }
         }
@@ -242,10 +105,10 @@ impl Navmap {
                 let z2 = (rand.gen::<f64>() * 0.9 + 0.05) * prim::DIM - prim::HDIM;
                 (x1, x2, z1, z2)
             } else {
-                let &(px, py) = rand.choose(&self.cmap.neighbors.get(&self.cmap.largest_water).unwrap()).unwrap();
+                let &(px, py) = rand.choose(&self.cmap.get_neighbors(self.cmap.largest_water).unwrap()).unwrap();
                 let x1 = terrain::undiscretize(px);
                 let z1 = terrain::undiscretize(py);
-                let &(px, py) = rand.choose(&self.cmap.neighbors.get(&self.cmap.largest_water).unwrap()).unwrap();
+                let &(px, py) = rand.choose(&self.cmap.get_neighbors(self.cmap.largest_water).unwrap()).unwrap();
                 let x2 = terrain::undiscretize(px);
                 let z2 = terrain::undiscretize(py);
                 (x1, x2, z1, z2)
@@ -259,7 +122,7 @@ impl Navmap {
             if all_flags_on_same && cm1 != flags_mass[0] {
                 continue;
             }
-            if cm1 <= 0 {
+            if !cm1.is_land() {
                 continue;
             }
             if (x2 - x1) + (z2 - z1).abs() < prim::DIM * 0.5 {
@@ -331,7 +194,7 @@ impl Navmap {
         if prof == SearchProfile::Land {
             let mass1 = self.cmap.get_mass(p1.x, p1.z);
             let mass2 = self.cmap.get_mass(p2.x, p2.z);
-            if mass1 != mass2 || mass1 <= 0 {
+            if mass1 != mass2 || !mass1.is_land() {
                 return None;
             }
         }
