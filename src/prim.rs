@@ -8,6 +8,8 @@ pub const HDIM: f64 = DIM * 0.5;
 
 pub const FLAG_TIMER: f64 = 10.0;
 
+pub const CAM_MIN_HEIGHT: f64 = 18.0;
+
 #[derive(PartialEq, Eq, Copy, Clone)]
 #[derive(RustcDecodable, RustcEncodable)]
 pub enum ViewMode {

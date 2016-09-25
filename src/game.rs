@@ -68,6 +68,17 @@ impl GameState {
         spawn_vehicles(&mut gs);
         Some(gs)
     }
+
+    fn update_camera_position(&mut self, frame_time: f32) -> () {
+        let add = na::rotate(
+            &Rotation3::new_observer_frame(&self.bf.camera.direction,
+                                           &self.bf.camera.upvec),
+            &(self.bf.camera.speed * cam_speed(self.bf.view_mode) * frame_time));
+        let mut newpos = self.bf.camera.position + add;
+        let map_height = f64::max(0.0, terrain::get_height_at(&self.bf.ground, newpos.x as f64, newpos.z as f64));
+        newpos.y = f32::max((map_height + prim::CAM_MIN_HEIGHT) as f32, newpos.y);
+        self.bf.camera.position = newpos;
+    }
 }
 
 pub fn won(game_state: &GameState) -> Option<prim::Side> {
@@ -86,10 +97,7 @@ pub fn update_game_state(mut game_state: &mut GameState, display: &glium::Displa
         }
     }
 
-    game_state.bf.camera.position += na::rotate(
-        &Rotation3::new_observer_frame(&game_state.bf.camera.direction,
-                                       &game_state.bf.camera.upvec),
-        &(game_state.bf.camera.speed * cam_speed(game_state.bf.view_mode) * frame_time as f32));
+    game_state.update_camera_position(frame_time as f32);
 
     for ev in display.poll_events() {
         match ev {

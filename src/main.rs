@@ -404,7 +404,7 @@ fn main() {
 
             let fov: f32 = 3.141592 / 3.0;
             let zfar = 131072.0;
-            let znear = 16.0;
+            let znear = f32::max(2.0, prim::CAM_MIN_HEIGHT as f32 - 2.0);
 
             let f = 1.0 / (fov / 2.0).tan();
 
